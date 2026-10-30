@@ -1,7 +1,6 @@
 # OmaExiled
 
-Path of Exile 2 price checker for [Omarchy](https://omarchy.org) (Arch +
-Hyprland + omarchy-shell). It is a native Wayland port of the price-check
+Path of Exile 2 price checker for [Omarchy](https://omarchy.org). It is a native* Wayland port of the price-check
 features of [Exiled Exchange 2](https://github.com/Kvan7/Exiled-Exchange-2):
 the same parser, filters, trade search and UI, shown in a Wayland overlay
 above the game instead of an Electron window.
@@ -16,8 +15,6 @@ What you get:
 - an omarchy-shell bar icon with EE2's tray menu (settings, league, browser,
   config folder, quit)
 
-Hotkeys only act while Path of Exile 2 is the focused window; everywhere else
-the keys work as usual.
 
 ## Credits
 
