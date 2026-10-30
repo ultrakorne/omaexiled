@@ -37,9 +37,10 @@
     </div>
     <ui-error-box v-else class="mb-4">
       <template #name>{{ t("app.leagues_failed") }}</template>
-      <p>{{ t("app.leagues_failed_help_alt") }}</p>
+      <p>{{ t("app.leagues_failed_help") }}</p>
       <template #actions>
         <button class="btn" @click="leagues.load">{{ t("Retry") }}</button>
+        <button class="btn" @click="openCaptcha">{{ t("Browser") }}</button>
       </template>
     </ui-error-box>
     <div class="mb-2">
@@ -136,12 +137,6 @@
         }}</ui-radio>
       </div>
     </div>
-    <ui-checkbox class="mb-4" v-model="requestPricePrediction"
-      >{{ t(":show_prediction") }}
-      <span class="bg-gray-700 px-1 rounded"
-        >www.poeprices.info</span
-      ></ui-checkbox
-    >
     <ui-checkbox class="mb-4" v-model="showCursor">{{
       t(":cursor_pos")
     }}</ui-checkbox>
@@ -168,14 +163,6 @@
       t(":always_show_tier")
     }}</ui-checkbox>
 
-    <div class="mb-4" :class="{ 'p-2 bg-orange-600 rounded': builtinBrowser }">
-      <ui-checkbox v-model="builtinBrowser">{{
-        t(":enable_browser")
-      }}</ui-checkbox>
-      <div v-if="builtinBrowser" class="mt-1">
-        {{ t(":builtin_browser_warning") }}
-      </div>
-    </div>
     <div class="border-2 rounded border-gray-700 mb-2">
       <div class="bg-gray-700 p-2 mb-2">{{ t(":warn_expensive") }}</div>
       <ui-checkbox
@@ -245,6 +232,8 @@ import UiToggle from "@/web/ui/UiToggle.vue";
 import UiErrorBox from "@/web/ui/UiErrorBox.vue";
 import { configModelValue, configProp, findWidget } from "../settings/utils.js";
 import type { PriceCheckWidget } from "@/web/overlay/interfaces";
+import { Host } from "@/web/background/IPC";
+import { poeWebApi } from "@/web/Config";
 import { useLeagues } from "../background/Leagues";
 import { getAugmentNameByRef } from "./filters/fill-augments.js";
 import { usePoeninja } from "../background/Prices.js";
@@ -265,6 +254,14 @@ export default defineComponent({
 
     return {
       t,
+      // OmaExiled: like the price check's leagues error, so captcha / login
+      // can be done from the settings window too
+      openCaptcha() {
+        Host.sendEvent({
+          name: "CLIENT->MAIN::open-browser",
+          payload: { url: `https://${poeWebApi()}/api/trade2/data/leagues` },
+        });
+      },
       leagueId: configModelValue(() => props.config, "leagueId"),
       customLeagueId: computed<string>({
         get: () =>
@@ -284,14 +281,6 @@ export default defineComponent({
         "activateStockFilter",
       ),
       showCursor: configModelValue(() => configWidget.value, "showCursor"),
-      builtinBrowser: configModelValue(
-        () => configWidget.value,
-        "builtinBrowser",
-      ),
-      requestPricePrediction: configModelValue(
-        () => configWidget.value,
-        "requestPricePrediction",
-      ),
       collapseListings: configModelValue(
         () => configWidget.value,
         "collapseListings",

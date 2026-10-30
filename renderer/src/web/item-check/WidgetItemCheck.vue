@@ -6,8 +6,7 @@
     :inline-edit="false"
   >
     <template v-if="item">
-      <MapCheck v-if="isMapLike" :item="item" :config="config.maps" />
-      <ItemInfo v-else :item="item" />
+      <ItemInfo :item="item" />
     </template>
   </Widget>
 </template>
@@ -28,7 +27,7 @@ export default {
         wmWants: "hide",
         wmZorder: "exclusive",
         wmFlags: ["hide-on-blur", "menu::skip"],
-        hotkey: null,
+        hotkey: "Alt + D",
         wikiKey: null,
         poedbKey: null,
         craftOfExileKey: null,
@@ -59,13 +58,12 @@ export default {
 
 <script setup lang="ts">
 import { computed, inject, ref } from "vue";
-import { MainProcess } from "@/web/background/IPC";
-import { ItemCategory, ItemRarity, parseClipboard, ParsedItem } from "@/parser";
+import { MainProcess, Host } from "@/web/background/IPC";
+import { parseClipboard, ParsedItem } from "@/parser";
 import { registerActions } from "./hotkeyable-actions";
 import type { WidgetManager } from "../overlay/interfaces";
 
 import Widget from "../overlay/Widget.vue";
-import MapCheck from "../map-check/MapCheck.vue";
 import ItemInfo from "./ItemInfo.vue";
 
 const props = defineProps<{
@@ -96,7 +94,7 @@ const anchor = computed(() => {
   const poePanelWidth = wm.poePanelWidth.value;
 
   const side =
-    checkPosition.value.x > window.screenX + width / 2 ? "inventory" : "stash";
+    checkPosition.value.x > Host.screenX + width / 2 ? "inventory" : "stash";
 
   return {
     pos: side === "stash" ? "cl" : "cr",
@@ -106,21 +104,5 @@ const anchor = computed(() => {
         ? (poePanelWidth / width) * 100
         : ((width - poePanelWidth) / width) * 100,
   };
-});
-
-const isMapLike = computed(() => {
-  if (!item.value) return false;
-  const {
-    category,
-    rarity,
-    info: { refName },
-  } = item.value;
-  return (
-    (category === ItemCategory.Map && rarity !== ItemRarity.Unique) ||
-    category === ItemCategory.HeistContract ||
-    category === ItemCategory.HeistBlueprint ||
-    category === ItemCategory.Invitation ||
-    refName === "Expedition Logbook"
-  );
 });
 </script>

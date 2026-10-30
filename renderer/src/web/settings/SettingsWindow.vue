@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div :class="$style.podium" v-if="podiumVisible">
+    <div :class="$style.podium" v-if="podiumVisible && !standalone">
       <div v-for="i in [2, 4, 5, 3, 1]">
         <div
           v-for="patron in patrons[i - 1]"
@@ -18,6 +18,7 @@
       </div>
     </div>
     <div
+      v-if="!standalone"
       :class="[$style.patronsHorizontal, { invisible: podiumVisible }]"
       :onMouseenter="showPodium"
     >
@@ -33,7 +34,7 @@
       </div>
     </div>
     <div
-      :class="$style.window"
+      :class="standalone ? $style.standalone : $style.window"
       class="grow layout-column"
       :onMouseenter="hidePodium"
     >
@@ -136,13 +137,7 @@ import SettingsPricecheck from "../price-check/settings-price-check.vue";
 import SettingsItemcheck from "../item-check/settings-item-check.vue";
 import SettingsHelp from "./help.vue";
 import SettingsDebug from "./debug.vue";
-import SettingsMaps from "../map-check/settings-maps.vue";
 import SettingsStashSearch from "../stash-search/stash-search-editor.vue";
-import SettingsStopwatch from "../stopwatch/settings-stopwatch.vue";
-import SettingsItemSearch from "../item-search/settings-item-search.vue";
-import SettingsLeveling from "../leveling/settings-leveling.vue";
-import SettingsLibrary from "../library/settings-library.vue";
-import { disableWidget, enableWidget, findWidget } from "./utils";
 
 function shuffle<T>(array: T[]): T[] {
   let currentIndex = array.length;
@@ -185,9 +180,15 @@ export default defineComponent({
       type: Object as PropType<Widget>,
       required: true,
     },
+    // OmaExiled: the settings window page (?mode=settings), not a widget in
+    // the overlay. It has no widget manager and is always shown.
+    standalone: {
+      type: Boolean,
+      default: false,
+    },
   },
   setup(props) {
-    const wm = inject<WidgetManager>("wm")!;
+    const wm = props.standalone ? null : inject<WidgetManager>("wm")!;
     const { t } = useI18n();
 
     nextTick(() => {
@@ -200,14 +201,18 @@ export default defineComponent({
     const patrons = shallowRef<Array<typeof APP_PATRONS>>([]);
 
     const configClone = shallowRef<Config | null>(null);
+    function cloneConfig() {
+      configClone.value = reactive(JSON.parse(JSON.stringify(AppConfig())));
+      patrons.value = [1, 2, 3, 4, 5].map((i) =>
+        shuffle(APP_PATRONS.filter((row) => row.style === i)),
+      );
+    }
     watch(
       () => props.config.wmWants,
       (wmWants) => {
+        if (props.standalone) return;
         if (wmWants === "show") {
-          configClone.value = reactive(JSON.parse(JSON.stringify(AppConfig())));
-          patrons.value = [1, 2, 3, 4, 5].map((i) =>
-            shuffle(APP_PATRONS.filter((row) => row.style === i)),
-          );
+          cloneConfig();
         } else {
           configClone.value = null;
           if (selectedWmId.value != null) {
@@ -224,13 +229,49 @@ export default defineComponent({
       configClone.value?.widgets.find((w) => w.wmId === selectedWmId.value),
     );
 
+    // OmaExiled: the settings window starts from the current config and
+    // follows its changes (saves from other pages, the league picked when
+    // the leagues load) until the user changes something.
+    let clonedFrom = "";
+    function cloneStandalone() {
+      cloneConfig();
+      clonedFrom = JSON.stringify(configClone.value);
+      if (selectedWmId.value != null && !configWidget.value) {
+        selectedWmId.value = null;
+        selectedComponent.value = SettingsHotkeys;
+      }
+    }
+    if (props.standalone) {
+      cloneStandalone();
+      watch(
+        () => AppConfig(),
+        () => {
+          if (JSON.stringify(configClone.value) === clonedFrom) {
+            cloneStandalone();
+          }
+        },
+        { deep: true },
+      );
+    }
+
+    function close() {
+      if (wm) {
+        wm.hide(props.config.wmId);
+      } else {
+        // the host hides the settings window
+        window.close();
+        // unsaved changes are gone the next time it is shown
+        cloneStandalone();
+      }
+    }
+
     watch(
       () => props.config.wmFlags,
       (wmFlags) => {
         const flagStr = wmFlags.find((flag) =>
           flag.startsWith("settings::widget="),
         );
-        if (flagStr) {
+        if (flagStr && wm) {
           const _wmId = Number(flagStr.split("=")[1]);
           const _widget = wm.widgets.value.find((w) => w.wmId === _wmId)!;
           selectedWmId.value = _wmId;
@@ -241,70 +282,56 @@ export default defineComponent({
       { deep: true },
     );
 
-    watch(
-      // any widget that requires client log
-      () => configClone.value?.readClientLog,
-      (curr, prev) => {
-        if (curr === prev || curr === undefined) return;
-        const xpTracker = findWidget("experience-tracker", configClone.value!);
-        if (curr) {
-          // Show widgets requiring this setting
-          if (xpTracker) {
-            enableWidget(xpTracker);
-          }
-        } else {
-          // Hide widgets requiring this setting
-          if (xpTracker) {
-            disableWidget(xpTracker);
-          }
+    const menuItems = computed(() => {
+      const groups = menuByType(
+        props.standalone ? undefined : configWidget.value?.wmType,
+      ).map((group) =>
+        group.map((component) => ({
+          name: t(component.name!),
+          select() {
+            selectedComponent.value = component;
+            if (props.standalone) selectedWmId.value = null;
+          },
+          isSelected: selectedComponent.value === component,
+          type: "menu-item" as const,
+        })),
+      );
+      // OmaExiled: the overlay opens a stash search's settings from the
+      // stash search widget; the settings window lists them instead
+      if (props.standalone) {
+        const stashSearches = (configClone.value?.widgets ?? []).filter(
+          (w) => w.wmType === "stash-search",
+        );
+        if (stashSearches.length) {
+          groups.push(
+            stashSearches.map((w) => ({
+              name: w.wmTitle || t("stash_search.name"),
+              select() {
+                selectedWmId.value = w.wmId;
+                selectedComponent.value = SettingsStashSearch;
+              },
+              isSelected: selectedWmId.value === w.wmId,
+              type: "menu-item" as const,
+            })),
+          );
         }
-      },
-    );
-
-    watch(
-      () =>
-        configClone.value?.enableAlphas &&
-        configClone.value?.alphas.includes("library"),
-      (curr) => {
-        if (curr === undefined) return;
-        const library = findWidget("library", configClone.value!);
-        if (!library) return;
-
-        if (curr) {
-          enableWidget(library);
-        } else {
-          disableWidget(library);
-        }
-      },
-    );
-
-    const menuItems = computed(() =>
-      flatJoin(
-        menuByType(configWidget.value?.wmType).map((group) =>
-          group.map((component) => ({
-            name: t(component.name!),
-            select() {
-              selectedComponent.value = component;
-            },
-            isSelected: selectedComponent.value === component,
-            type: "menu-item" as const,
-          })),
-        ),
-        () => ({ type: "separator" as const }),
-      ),
-    );
+      }
+      return flatJoin(groups, () => ({ type: "separator" as const }));
+    });
 
     return {
       t,
       save() {
         updateConfig(configClone.value!);
-        saveConfig();
+        // OmaExiled: close first and save now. EE2 saved while this
+        // exclusive widget was still shown, so saveConfig did nothing until
+        // a later blur, which a never-focused overlay may not get.
+        close();
+        saveConfig({ force: true });
         pushHostConfig();
-
-        wm.hide(props.config.wmId);
       },
       cancel() {
-        wm.hide(props.config.wmId);
+        close();
       },
       quit,
       menuItems,
@@ -339,22 +366,15 @@ function menuByType(type?: string) {
   switch (type) {
     case "stash-search":
       return [[SettingsStashSearch]];
-    case "timer":
-      return [[SettingsStopwatch]];
     case "item-check":
-      return [[SettingsItemcheck, SettingsMaps]];
+      return [[SettingsItemcheck]];
     case "price-check":
       return [[SettingsPricecheck]];
-    case "item-search":
-      return [[SettingsItemSearch]];
-    case "library":
-      return [[SettingsLibrary]];
     default:
       return [
         [SettingsHotkeys, SettingsChat],
         [SettingsGeneral],
-        [SettingsPricecheck, SettingsMaps, SettingsItemcheck],
-        [SettingsLeveling],
+        [SettingsPricecheck, SettingsItemcheck],
         [SettingsHelp, SettingsDebug, SettingsAbout],
       ];
   }
@@ -388,6 +408,13 @@ function flatJoin<T, J>(arr: T[][], joinEl: () => J) {
     animation-name: slideInDown;
     animation-duration: 1s;
   }
+}
+
+.standalone {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  @apply bg-gray-800;
 }
 
 .menu-item {

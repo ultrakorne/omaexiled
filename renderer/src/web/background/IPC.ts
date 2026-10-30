@@ -7,9 +7,22 @@ import type {
 import { shallowRef } from "vue";
 import Sockette from "sockette";
 
+// OmaExiled: what this page is, from its `?mode=` parameter.
+// - "overlay": the layer surface over the game window (EE2's Electron overlay)
+// - "settings": the standalone settings window
+// - "browser": no parameter, EE2's browser mode
+export type HostMode = "overlay" | "settings" | "browser";
+
+function pageMode(): HostMode {
+  const mode = new URLSearchParams(window.location.search).get("mode");
+  return mode === "overlay" || mode === "settings" ? mode : "browser";
+}
+
 class HostTransport {
   private evBus = new EventTarget();
   private socket!: Sockette;
+  private reconnectCbs = new Set<() => void>();
+  readonly mode: HostMode = pageMode();
   logs = shallowRef("");
   version = shallowRef("0.0.00000");
   updateInfo = shallowRef<UpdateInfo>({ state: "initial" });
@@ -22,12 +35,23 @@ class HostTransport {
       this.updateInfo.value = info;
     });
     await new Promise((resolve) => {
-      this.socket = new Sockette(`ws://${window.location.host}/events`, {
-        onmessage: (e) => {
-          this.selfDispatch(JSON.parse(e.data));
+      let opened = false;
+      this.socket = new Sockette(
+        `ws://${window.location.host}/events?role=${this.mode}`,
+        {
+          onmessage: (e) => {
+            this.selfDispatch(JSON.parse(e.data));
+          },
+          onopen: (e) => {
+            if (!opened) {
+              opened = true;
+              resolve(e);
+            } else {
+              this.reconnectCbs.forEach((cb) => cb());
+            }
+          },
         },
-        onopen: resolve,
-      });
+      );
     });
   }
 
@@ -48,7 +72,7 @@ class HostTransport {
     cb: (payload: IpcEventPayload<Name>) => void,
   ): AbortController {
     const controller = new AbortController();
-    if (!this.isElectron && name.startsWith("MAIN->OVERLAY")) {
+    if (!this.isOverlay && name.startsWith("MAIN->OVERLAY")) {
       return controller;
     }
 
@@ -62,6 +86,13 @@ class HostTransport {
     return controller;
   }
 
+  // OmaExiled: called after the WebSocket reconnects (e.g. a backend
+  // restart), which forgets state that was only sent on change.
+  onReconnect(cb: () => void): () => void {
+    this.reconnectCbs.add(cb);
+    return () => this.reconnectCbs.delete(cb);
+  }
+
   async getConfig(): Promise<string | null> {
     const response = await fetch("/config");
     const config = (await response.json()) as HostState;
@@ -71,22 +102,25 @@ class HostTransport {
     return config.contents;
   }
 
-  async importFile(file: File): Promise<string> {
-    const response = await fetch(`/uploads/${file.name}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file,
-    });
-    const body = (await response.json()) as { name: string };
-    return body.name;
-  }
-
   proxy: (typeof window)["fetch"] = async (url, init) => {
     return await window.fetch(`/proxy/${url as string}`, init);
   };
 
-  get isElectron() {
-    return navigator.userAgent.includes("Electron");
+  // OmaExiled: replaces EE2's `isElectron` UA sniff. The overlay page has
+  // EE2's Electron overlay semantics.
+  get isOverlay() {
+    return this.mode === "overlay";
+  }
+
+  // OmaExiled: use instead of window.screenX/Y in position math. In overlay
+  // mode item-text positions are relative to the overlay surface, which
+  // covers exactly the game window, whatever position Qt reports for it.
+  get screenX() {
+    return this.isOverlay ? 0 : window.screenX;
+  }
+
+  get screenY() {
+    return this.isOverlay ? 0 : window.screenY;
   }
 }
 

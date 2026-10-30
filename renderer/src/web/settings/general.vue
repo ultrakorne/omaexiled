@@ -45,14 +45,6 @@
     <ui-checkbox class="mb-4" v-model="restoreClipboard">{{
       t(":restore_clipboard")
     }}</ui-checkbox>
-    <div class="mb-2">
-      <div class="flex-1 mb-1">{{ t(":poe_log_file") }}</div>
-      <input
-        v-model.trim="clientLog"
-        class="rounded bg-gray-900 px-1 block w-full font-sans"
-        placeholder="...?/Grinding Gear Games/Path of Exile 2/logs/Client.txt"
-      />
-    </div>
     <div class="mb-4">
       <div class="flex-1 mb-1">{{ t(":poe_cfg_file") }}</div>
       <input
@@ -80,18 +72,9 @@
       v-model="overlayBackgroundClose"
       >{{ t(":overlay_bg_focus_game") }}</ui-checkbox
     >
-    <ui-checkbox class="mb-4" v-model="showAttachNotification">{{
-      t(":show_overlay_ready")
-    }}</ui-checkbox>
     <ui-checkbox class="mb-4" v-model="overlayAlwaysClose">{{
       t(":overlay_always_close")
     }}</ui-checkbox>
-    <ui-checkbox class="mb-1" v-model="hideOverlayOnBlur">{{
-      t(":hide_overlay_on_blur")
-    }}</ui-checkbox>
-    <div class="italic text-gray-500 mb-4">
-      {{ t(":hide_overlay_on_blur_hint") }}
-    </div>
     <div class="mb-4">
       <div class="flex-1 mb-1">
         {{ t(":window_title") }}
@@ -104,25 +87,11 @@
         class="rounded bg-gray-900 px-1 block w-full mb-1 font-poe"
       />
     </div>
-    <ui-checkbox class="mb-1" v-model="readClientLog">{{
-      t(":read_client_log")
-    }}</ui-checkbox>
-    <div class="italic text-gray-500 mb-4">
-      {{ t(":client_log_explain") }}
-    </div>
-    <div class="mb-4" :class="{ 'p-2 bg-slate-800 rounded': enableAlphas }">
-      <ui-checkbox class="mb-4" v-model="enableAlphas">{{
-        t(":enable_alphas")
-      }}</ui-checkbox>
-      <ui-checkbox v-model="libraryAlpha" v-if="enableAlphas">{{
-        t(":alpha_library")
-      }}</ui-checkbox>
-    </div>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, ref, watch } from "vue";
+import { defineComponent, computed } from "vue";
 import { useI18nNs } from "@/web/i18n";
 import UiRadio from "@/web/ui/UiRadio.vue";
 import UiCheckbox from "@/web/ui/UiCheckbox.vue";
@@ -135,22 +104,6 @@ export default defineComponent({
   props: configProp(),
   setup(props) {
     const { t } = useI18nNs("settings");
-    const libraryAlpha = ref(
-      AppConfig().enableAlphas && AppConfig().alphas.includes("library"),
-    );
-    watch(
-      libraryAlpha,
-      (value) => {
-        if (value) {
-          props.config.alphas.push("library");
-        } else {
-          props.config.alphas = props.config.alphas.filter(
-            (alpha) => alpha !== "library",
-          );
-        }
-      },
-      { immediate: true },
-    );
 
     return {
       t,
@@ -163,7 +116,6 @@ export default defineComponent({
         () => props.config,
         "overlayBackground",
       ),
-      clientLog: configModelValue(() => props.config, "clientLog"),
       gameConfig: configModelValue(() => props.config, "gameConfig"),
       language: computed<typeof props.config.language>({
         get() {
@@ -216,22 +168,11 @@ export default defineComponent({
         () => props.config,
         "restoreClipboard",
       ),
-      showAttachNotification: configModelValue(
-        () => props.config,
-        "showAttachNotification",
-      ),
       overlayAlwaysClose: configModelValue(
         () => props.config,
         "overlayAlwaysClose",
       ),
-      hideOverlayOnBlur: configModelValue(
-        () => props.config,
-        "hideOverlayOnBlur",
-      ),
       windowTitle: configModelValue(() => props.config, "windowTitle"),
-      enableAlphas: configModelValue(() => props.config, "enableAlphas"),
-      readClientLog: configModelValue(() => props.config, "readClientLog"),
-      libraryAlpha,
     };
   },
 });

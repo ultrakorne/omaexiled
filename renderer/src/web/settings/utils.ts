@@ -47,14 +47,3 @@ export function _configModelValue<
 export function findWidget<T extends Widget>(type: string, config: Config) {
   return config.widgets.find((w) => w.wmType === type) as T | undefined;
 }
-
-export function disableWidget(widget: Widget) {
-  widget.wmWants = "hide";
-  if (!widget.wmFlags.includes("menu::skip")) {
-    widget.wmFlags.push("menu::skip");
-  }
-}
-
-export function enableWidget(widget: Widget) {
-  widget.wmFlags = widget.wmFlags.filter((flag) => flag !== "menu::skip");
-}

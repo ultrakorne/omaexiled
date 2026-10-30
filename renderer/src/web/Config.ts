@@ -5,9 +5,7 @@ import { HostConfig, ShortcutAction } from "@ipc/types";
 import type * as widget from "./overlay/widgets";
 import type { StashSearchWidget } from "./stash-search/widget";
 import type { ItemCheckWidget } from "./item-check/widget";
-import type { ItemSearchWidget } from "./item-search/widget";
 import { registry as widgetRegistry } from "./overlay/widget-registry.js";
-import { LibraryWidget } from "./library/widget";
 
 const _config = shallowRef<Config | null>(null);
 let _lastSavedConfig: Config | null = null;
@@ -27,9 +25,12 @@ export function updateConfig(updates: Config) {
   document.documentElement.style.fontSize = `${_config.value!.fontSize}px`;
 }
 
-export function saveConfig(opts?: { isTemporary: boolean }) {
+// OmaExiled: `force` saves even while an exclusive widget is shown (settings
+// Save, which must not wait for a later save trigger).
+export function saveConfig(opts?: { isTemporary?: boolean; force?: boolean }) {
   const rawConfig = toRaw(_config.value!);
   if (
+    !opts?.force &&
     rawConfig.widgets.some(
       (w) => w.wmZorder === "exclusive" && w.wmWants === "show",
     )
@@ -157,7 +158,7 @@ export interface Config {
 }
 
 export const defaultConfig = (): Config => ({
-  configVersion: 35,
+  configVersion: 36,
   overlayKey: "Shift + Space",
   overlayBackground: "rgba(129, 139, 149, 0.15)",
   overlayBackgroundClose: true,
@@ -232,6 +233,96 @@ export const defaultConfig = (): Config => ({
   readClientLog: false, // default to false, opt-in only
 });
 
+// Defaults of the EE2 widgets that are not ported, as EE2 defines them. Only
+// the EE2 steps in upgradeConfig() use them; the widgets are removed from
+// the config right after those steps.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function droppedWidgetDefaults(): Array<Record<string, any>> {
+  return [
+    {
+      wmId: 0,
+      wmType: "item-search",
+      wmTitle: "{icon=fa-search}",
+      wmWants: "hide",
+      wmZorder: null,
+      wmFlags: ["invisible-on-blur"],
+      anchor: { pos: "tl", x: 10, y: 20 },
+      ocrGemsKey: null,
+    },
+    {
+      wmId: 0,
+      wmType: "experience-tracker",
+      wmTitle: "XP",
+      wmWants: "hide",
+      wmZorder: null,
+      wmFlags: [],
+      anchor: { pos: "bc", x: 68, y: 98 },
+      showExp: true,
+    },
+    {
+      wmId: 0,
+      wmType: "image-strip",
+      wmTitle: "Cheat sheets",
+      wmWants: "hide",
+      wmZorder: null,
+      wmFlags: ["invisible-on-blur"],
+      anchor: { pos: "tc", x: 50, y: 10 },
+      images: [{ id: 1, url: "syndicate.jpg" }],
+    },
+    {
+      wmId: 0,
+      wmType: "delve-grid",
+      wmTitle: "",
+      wmWants: "hide",
+      wmZorder: null,
+      wmFlags: ["hide-on-focus", "menu::skip"],
+      toggleKey: null,
+    },
+    {
+      wmId: 0,
+      wmType: "library",
+      wmTitle: "{icon=fa-book}",
+      wmWants: "hide",
+      wmZorder: null,
+      wmFlags: ["invisible-on-blur", "menu::skip"],
+      anchor: { pos: "tl", x: 20, y: 20 },
+      logItemKey: null,
+      libraryOutputPath: null,
+      selectedProfile: "chaos",
+      profiles: {
+        chaos: {
+          refName: true,
+          itemLevel: true,
+          rarity: true,
+          sockets: true,
+          mods: true,
+          addedMods: true,
+          removedMods: true,
+          keep: {
+            explicit: true,
+            implicit: false,
+            enchant: false,
+            augment: false,
+          },
+          modOpts: {
+            name: true,
+            tier: true,
+            roll: true,
+            ref: true,
+            type: true,
+            generation: true,
+          },
+        },
+      },
+    },
+  ];
+}
+
+function upgradeDefaultWidgets(): Array<Record<string, any>> {
+  return [...defaultConfig().widgets, ...droppedWidgetDefaults()];
+}
+/* eslint-enable */
+
 function upgradeConfig(_config: Config): Config {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const config = _config as Omit<Config, "widgets"> & {
@@ -240,13 +331,13 @@ function upgradeConfig(_config: Config): Config {
 
   if (config.configVersion < 3) {
     config.widgets.push({
-      ...defaultConfig().widgets.find((w) => w.wmType === "image-strip")!,
+      ...upgradeDefaultWidgets().find((w) => w.wmType === "image-strip")!,
       wmId: Math.max(0, ...config.widgets.map((_) => _.wmId)) + 1,
       wmZorder: null,
     });
 
     config.widgets.push({
-      ...defaultConfig().widgets.find((w) => w.wmType === "delve-grid")!,
+      ...upgradeDefaultWidgets().find((w) => w.wmType === "delve-grid")!,
       wmId: Math.max(0, ...config.widgets.map((_) => _.wmId)) + 1,
       wmZorder: null,
     });
@@ -261,8 +352,8 @@ function upgradeConfig(_config: Config): Config {
       (w) => w.wmType === "price-check",
     )!.chaosPriceThreshold = 0.05;
 
-    const mapCheck = config.widgets.find((w) => w.wmType === "map-check")!;
-    (mapCheck as any).selectedStats.forEach((e: any) => {
+    const mapCheck = config.widgets.find((w) => w.wmType === "map-check");
+    mapCheck?.selectedStats.forEach((e: any) => {
       e.matcher = e.matchRef;
       e.matchRef = undefined;
     });
@@ -297,10 +388,12 @@ function upgradeConfig(_config: Config): Config {
   }
 
   if (config.configVersion < 7) {
-    const mapCheck = config.widgets.find((w) => w.wmType === "map-check")!;
-    mapCheck.wmType = "item-check";
-    mapCheck.maps = { selectedStats: mapCheck.selectedStats };
-    mapCheck.selectedStats = undefined;
+    const mapCheck = config.widgets.find((w) => w.wmType === "map-check");
+    if (mapCheck) {
+      mapCheck.wmType = "item-check";
+      mapCheck.maps = { selectedStats: mapCheck.selectedStats };
+      mapCheck.selectedStats = undefined;
+    }
     (config as any).itemCheckKey = (config as any).mapCheckKey || null;
     (config as any).mapCheckKey = undefined;
 
@@ -345,7 +438,7 @@ function upgradeConfig(_config: Config): Config {
 
   if (config.configVersion < 10) {
     config.widgets.push({
-      ...defaultConfig().widgets.find((w) => w.wmType === "settings")!,
+      ...upgradeDefaultWidgets().find((w) => w.wmType === "settings")!,
       wmId: Math.max(0, ...config.widgets.map((_) => _.wmId)) + 1,
     });
 
@@ -377,7 +470,7 @@ function upgradeConfig(_config: Config): Config {
       (w) => w.wmType === "settings",
     );
     config.widgets.splice(afterSettings + 1, 0, {
-      ...defaultConfig().widgets.find((w) => w.wmType === "item-search")!,
+      ...upgradeDefaultWidgets().find((w) => w.wmType === "item-search")!,
       wmWants: "show",
       wmId: Math.max(0, ...config.widgets.map((_) => _.wmId)) + 1,
     });
@@ -425,10 +518,10 @@ function upgradeConfig(_config: Config): Config {
     ) as widget.PriceCheckWidget;
     priceCheck.builtinBrowser = false;
 
-    const itemSearch = config.widgets.find(
-      (w) => w.wmType === "item-search",
-    ) as ItemSearchWidget;
-    itemSearch.ocrGemsKey = null;
+    const itemSearch = config.widgets.find((w) => w.wmType === "item-search");
+    if (itemSearch) {
+      itemSearch.ocrGemsKey = null;
+    }
 
     const itemCheck = config.widgets.find(
       (w) => w.wmType === "item-check",
@@ -451,10 +544,10 @@ function upgradeConfig(_config: Config): Config {
   }
 
   if (config.configVersion < 16) {
-    const delve = config.widgets.find(
-      (w) => w.wmType === "delve-grid",
-    ) as widget.DelveGridWidget;
-    delve.toggleKey = (config as any).delveGridKey;
+    const delve = config.widgets.find((w) => w.wmType === "delve-grid");
+    if (delve) {
+      delve.toggleKey = (config as any).delveGridKey;
+    }
 
     const itemCheck = config.widgets.find(
       (w) => w.wmType === "item-check",
@@ -538,10 +631,10 @@ function upgradeConfig(_config: Config): Config {
       }
     }
 
-    const itemSearch = config.widgets.find(
-      (w) => w.wmType === "item-search",
-    ) as widget.Widget;
-    itemSearch.wmTitle = "{icon=fa-search}";
+    const itemSearch = config.widgets.find((w) => w.wmType === "item-search");
+    if (itemSearch) {
+      itemSearch.wmTitle = "{icon=fa-search}";
+    }
     const settings = config.widgets.find(
       (w) => w.wmType === "settings",
     ) as widget.Widget;
@@ -603,12 +696,12 @@ function upgradeConfig(_config: Config): Config {
   }
   if (config.configVersion < 29) {
     // NOTE: v0.13.0 || poe0.4.0
-    const itemSearchId: number = config.widgets.find(
-      (w) => w.wmType === "item-search",
-    )!.wmId;
+    const itemSearchId: number =
+      config.widgets.find((w) => w.wmType === "item-search")?.wmId ??
+      config.widgets.length;
     // splicing to insert after the item-search widget, for positioning on the main overlay
     config.widgets.splice(itemSearchId, 0, {
-      ...defaultConfig().widgets.find(
+      ...upgradeDefaultWidgets().find(
         (w) => w.wmType === "experience-tracker",
       )!,
       wmId: Math.max(0, ...config.widgets.map((_) => _.wmId)) + 1,
@@ -629,12 +722,12 @@ function upgradeConfig(_config: Config): Config {
 
   if (config.configVersion < 30) {
     // NOTE: v0.14.0 || poe0.4.0d
-    const itemSearchId: number = config.widgets.find(
-      (w) => w.wmType === "item-search",
-    )!.wmId;
+    const itemSearchId: number =
+      config.widgets.find((w) => w.wmType === "item-search")?.wmId ??
+      config.widgets.length;
     // splicing to insert after the item-search widget, for positioning on the main overlay
     config.widgets.splice(itemSearchId, 0, {
-      ...defaultConfig().widgets.find((w) => w.wmType === "library")!,
+      ...upgradeDefaultWidgets().find((w) => w.wmType === "library")!,
       wmId: Math.max(0, ...config.widgets.map((_) => _.wmId)) + 1,
     });
 
@@ -663,11 +756,11 @@ function upgradeConfig(_config: Config): Config {
 
   if (config.configVersion < 33) {
     // NOTE: v0.15.6 || poe0.5.2
-    const libraryWidget = config.widgets.find(
-      (w) => w.wmType === "library",
-    ) as LibraryWidget;
-    libraryWidget.selectedProfile = "chaos";
-    libraryWidget.profiles.chaos!.modOpts.generation = true;
+    const libraryWidget = config.widgets.find((w) => w.wmType === "library");
+    if (libraryWidget) {
+      libraryWidget.selectedProfile = "chaos";
+      libraryWidget.profiles.chaos.modOpts.generation = true;
+    }
 
     // why is this one higher?
     config.configVersion = 34;
@@ -684,9 +777,76 @@ function upgradeConfig(_config: Config): Config {
 
     config.configVersion = 35;
   }
+
+  // OmaExiled: drop the widgets of EE2 features that are not ported, and
+  // repair the single-instance widgets the app relies on (exactly one each;
+  // the menu also keeps the overlay's numeric z-order invariant).
+  config.widgets = config.widgets.filter((w, idx) => {
+    const component = widgetRegistry.getWidgetComponent(w.wmType);
+    if (!component) return false;
+    return (
+      component.widget.instances !== "single" ||
+      config.widgets.findIndex((_) => _.wmType === w.wmType) === idx
+    );
+  });
+  for (const { widget } of widgetRegistry.widgets) {
+    if (
+      widget.instances === "single" &&
+      !config.widgets.some((w) => w.wmType === widget.type)
+    ) {
+      config.widgets.push({
+        ...widget.initInstance!(),
+        wmId: Math.max(0, ...config.widgets.map((_) => _.wmId)) + 1,
+      });
+    }
+  }
+
+  if (config.configVersion < 36) {
+    // NOTE: OmaExiled, item check gets a default hotkey (none in EE2)
+    const itemCheck = config.widgets.find(
+      (w) => w.wmType === "item-check",
+    ) as ItemCheckWidget;
+    if (
+      itemCheck.hotkey == null &&
+      !configHotkeys(config as unknown as Config).includes("Alt + D")
+    ) {
+      itemCheck.hotkey = "Alt + D";
+    }
+
+    config.configVersion = 36;
+  }
   /* eslint-enable */
 
   return config as unknown as Config;
+}
+
+// Hotkeys of the ported features, as getConfigForHost() registers them.
+function configHotkeys(config: Config): string[] {
+  const keys: Array<string | null> = [config.overlayKey];
+  for (const w of config.widgets) {
+    if (w.wmType === "price-check") {
+      const priceCheck = w as widget.PriceCheckWidget;
+      if (priceCheck.hotkey) {
+        keys.push(`${priceCheck.hotkeyHold} + ${priceCheck.hotkey}`);
+      }
+      keys.push(priceCheck.hotkeyLocked);
+    } else if (w.wmType === "item-check") {
+      const itemCheck = w as ItemCheckWidget;
+      keys.push(
+        itemCheck.hotkey,
+        itemCheck.wikiKey,
+        itemCheck.craftOfExileKey,
+        itemCheck.poedbKey,
+        itemCheck.stashSearchKey,
+        itemCheck.samePricedKey,
+      );
+    } else if (w.wmType === "stash-search") {
+      const entries = (w as StashSearchWidget).entries ?? [];
+      keys.push(...entries.map((e) => e.hotkey));
+    }
+  }
+  keys.push(...config.commands.map((c) => c.hotkey));
+  return keys.filter((key): key is string => Boolean(key));
 }
 
 function getConfigForHost(): HostConfig {
@@ -748,23 +908,6 @@ function getConfigForHost(): HostConfig {
       action: { type: "copy-item", target: "item-check", focusOverlay: true },
     });
   }
-  const library = AppConfig("library") as LibraryWidget;
-  if (library.logItemKey) {
-    actions.push({
-      shortcut: library.logItemKey,
-      keepModKeys: true,
-      action: { type: "copy-item", target: "log-item" },
-    });
-  }
-
-  const delveGrid = AppConfig("delve-grid") as widget.DelveGridWidget;
-  if (delveGrid.toggleKey) {
-    actions.push({
-      shortcut: delveGrid.toggleKey,
-      action: { type: "trigger-event", target: "delve-grid" },
-      keepModKeys: true,
-    });
-  }
   for (const command of config.commands) {
     if (command.hotkey) {
       actions.push({
@@ -790,54 +933,31 @@ function getConfigForHost(): HostConfig {
           });
         }
       }
-    } else if (widget.wmType === "timer") {
-      const stopwatch = widget as widget.StopwatchWidget;
-      if (stopwatch.toggleKey) {
-        actions.push({
-          shortcut: stopwatch.toggleKey,
-          keepModKeys: true,
-          action: {
-            type: "trigger-event",
-            target: `stopwatch-start-stop:${widget.wmId}`,
-          },
-        });
-      }
-      if (stopwatch.resetKey) {
-        actions.push({
-          shortcut: stopwatch.resetKey,
-          keepModKeys: true,
-          action: {
-            type: "trigger-event",
-            target: `stopwatch-reset:${widget.wmId}`,
-          },
-        });
-      }
-    } else if (widget.wmType === "item-search") {
-      const itemSearch = widget as ItemSearchWidget;
-      if (itemSearch.ocrGemsKey) {
-        actions.push({
-          shortcut: itemSearch.ocrGemsKey,
-          keepModKeys: true,
-          action: { type: "ocr-text", target: "heist-gems" },
-        });
-      }
     }
   }
 
   return {
     shortcuts: actions,
     restoreClipboard: config.restoreClipboard,
-    clientLog: config.clientLog,
+    // client log, library: not ported
+    clientLog: null,
     gameConfig: config.gameConfig,
     stashScroll: config.stashScroll,
     overlayKey: config.overlayKey,
     logKeys: config.logKeys,
     windowTitle: config.windowTitle,
     language: config.language,
-    readClientLog: config.readClientLog,
-    libraryAlpha: config.enableAlphas && config.alphas.includes("library"),
-    libraryOutputPath: library.libraryOutputPath,
+    readClientLog: false,
+    libraryAlpha: false,
+    libraryOutputPath: null,
     initialDelay: priceCheck.initialDelay,
     hideOverlayOnBlur: config.hideOverlayOnBlur,
   };
 }
+
+// Disable since this is export for tests
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export const __testExports = {
+  upgradeConfig,
+  getConfigForHost,
+};

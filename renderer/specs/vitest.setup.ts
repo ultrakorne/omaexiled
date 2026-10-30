@@ -113,11 +113,14 @@ vi.mock("@/web/background/IPC", () => ({
     onEvent: vi.fn(() => new AbortController()),
     sendEvent: vi.fn(),
     getConfig: vi.fn(async () => null),
-    importFile: vi.fn(async (file: File) => file.name),
     logs: { value: "" },
     version: { value: "0.0.00000" },
     updateInfo: { value: { state: "initial" } },
-    isElectron: true,
+    mode: "overlay",
+    isOverlay: true,
+    screenX: 0,
+    screenY: 0,
+    onReconnect: vi.fn(() => () => true),
   },
 }));
 

@@ -1,6 +1,7 @@
 <template>
   <div
     id="overlay-window"
+    ref="overlayEl"
     class="overflow-hidden relative w-full h-full"
     :style="{ '--game-panel': poePanelWidth.toFixed(4) + 'px' }"
   >
@@ -47,9 +48,6 @@
         <span class="bg-blue-800 rounded px-1">{{ overlayKey }}</span>
       </i18n-t>
     </div>
-    <!-- <template v-if="isDev">
-      <dev-widget text="DEV" />
-    </template> -->
     <!-- <div v-show="!gameFocused && !active">
       <div style="right: 24px; bottom: 24px; position: absolute;" class="bg-red-500 p-2 rounded">Game window is not active</div>
     </div> -->
@@ -73,25 +71,22 @@ import { Widget, WidgetManager } from "./interfaces";
 import { registry } from "./widget-registry.js";
 import { AppConfig, saveConfig, pushHostConfig } from "@/web/Config";
 import LoadingAnimation from "./LoadingAnimation.vue";
+import { useInputRegion } from "./input-region";
 // ---
 import { usePoeninja } from "@/web/background/Prices";
 import { useLeagues } from "@/web/background/Leagues";
-import { useClientLog } from "@/web/client-log/client-log";
-import DevWidget from "./DevWidget.vue";
 
 type WMID = Widget["wmId"];
 
 export default defineComponent({
   components: {
     LoadingAnimation,
-    DevWidget,
   },
   setup() {
     usePoeninja();
     useLeagues().load();
-    const { handleLine } = useClientLog();
 
-    const active = shallowRef(!Host.isElectron);
+    const active = shallowRef(!Host.isOverlay);
     const gameFocused = shallowRef(false);
     const hideUI = shallowRef(false);
     const showEditingNotification = shallowRef(false);
@@ -119,7 +114,7 @@ export default defineComponent({
     window.addEventListener("focus", () => {
       Host.sendEvent({
         name: "CLIENT->MAIN::used-recently",
-        payload: { isOverlay: Host.isElectron },
+        payload: { isOverlay: Host.isOverlay },
       });
     });
 
@@ -131,13 +126,19 @@ export default defineComponent({
     });
 
     Host.onEvent("MAIN->OVERLAY::focus-change", (state) => {
+      const wasActive = active.value;
       active.value = state.overlay;
       gameFocused.value = state.game;
 
       if (active.value === false) {
-        for (const w of widgets.value) {
-          if (w.wmFlags.includes("hide-on-blur")) {
-            hide(w.wmId);
+        // Read-only price panels are shown while the game keeps focus, and
+        // the backend can repeat overlay:false in that state; that is not a
+        // blur and must not hide a panel that was never active.
+        if (wasActive) {
+          for (const w of widgets.value) {
+            if (w.wmFlags.includes("hide-on-blur")) {
+              hide(w.wmId);
+            }
           }
         }
       } else {
@@ -152,26 +153,11 @@ export default defineComponent({
       hideUI.value = !e.isVisible;
     });
 
-    const lineQueue: string[] = [];
-    let processing = false;
-    Host.onEvent("MAIN->CLIENT::game-log", (e) => {
-      lineQueue.push(...e.lines);
-      processQueue();
-    });
-    function processQueue() {
-      if (processing) return;
-      processing = true;
-      while (lineQueue.length) {
-        handleLine(lineQueue.shift()!);
-      }
-      processing = false;
-    }
-
     onMounted(() => {
       nextTick(() => {
         Host.sendEvent({
           name: "CLIENT->MAIN::used-recently",
-          payload: { isOverlay: Host.isElectron },
+          payload: { isOverlay: Host.isOverlay },
         });
         pushHostConfig();
       });
@@ -273,7 +259,7 @@ export default defineComponent({
     });
 
     const isOverlayVisible = computed(() => {
-      if (!Host.isElectron) return true;
+      if (!Host.isOverlay) return true;
       if (active.value) return true;
       if (showEditingNotification.value) return true;
       if (AppConfig().logKeys) return true;
@@ -284,7 +270,7 @@ export default defineComponent({
     watch(
       isOverlayVisible,
       (curr, prev) => {
-        if (curr === prev) return;
+        if (curr === prev || !Host.isOverlay) return;
 
         Host.sendEvent({
           name: "OVERLAY->MAIN::render-state",
@@ -293,6 +279,17 @@ export default defineComponent({
       },
       { immediate: true },
     );
+
+    const overlayEl = shallowRef<HTMLElement | null>(null);
+    if (Host.isOverlay) {
+      Host.onReconnect(() => {
+        Host.sendEvent({
+          name: "OVERLAY->MAIN::render-state",
+          payload: { shouldShow: isOverlayVisible.value },
+        });
+      });
+      useInputRegion(overlayEl, active);
+    }
 
     const topmostWidget = computed<Widget>(() => {
       // guaranteed to always exist because of the 'widget-menu'
@@ -314,11 +311,8 @@ export default defineComponent({
       (widget, wasWidget) => {
         showEditingNotification.value = widget.wmType === "settings";
         // TODO: hack, should find a better way to save config
-        if (
-          wasWidget &&
-          wasWidget.wmZorder === "exclusive" &&
-          wasWidget.wmType !== "settings"
-        ) {
+        // OmaExiled: settings too; nothing could be saved while it was shown
+        if (wasWidget && wasWidget.wmZorder === "exclusive") {
           saveConfig();
         }
       },
@@ -326,7 +320,7 @@ export default defineComponent({
     );
 
     const poePanelWidth = computed(() => {
-      if (!Host.isElectron) return 0;
+      if (!Host.isOverlay) return 0;
       // sidebar is 986px at Wx1600H
       const ratio = 986 / 1600;
       return size.value.height * ratio;
@@ -351,7 +345,7 @@ export default defineComponent({
           name: "OVERLAY->MAIN::focus-game",
           payload: undefined,
         });
-      } else if (!Host.isElectron) {
+      } else if (!Host.isOverlay) {
         const widget = topmostOrExclusiveWidget.value;
         if (widget.wmZorder === "exclusive") {
           hide(widget.wmId);
@@ -373,12 +367,6 @@ export default defineComponent({
       return visibilityState.value.find((_) => _.wmId === wmId)!.isVisible;
     }
 
-    document.addEventListener("click", (e) => {
-      if (e.target instanceof HTMLInputElement && e.target.type === "file") {
-        showEditingNotification.value = true;
-      }
-    });
-
     function sliceLastLines(text: string, numLines: number) {
       let lfIndex = text.length - 1;
       for (let i = 0; i < numLines; i++) {
@@ -392,6 +380,7 @@ export default defineComponent({
 
     return {
       t,
+      overlayEl,
       poePanelWidth,
       overlayBackground,
       widgets: computed(() => AppConfig().widgets),
@@ -406,7 +395,6 @@ export default defineComponent({
         () => !active.value && showEditingNotification.value,
       ),
       registry,
-      isDev: import.meta.env.DEV,
     };
   },
 });

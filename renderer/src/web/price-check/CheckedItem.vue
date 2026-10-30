@@ -1,8 +1,6 @@
 <template>
   <div v-if="noUniqueSelection" class="p-4 layout-column min-h-0">
     <filter-name :filters="itemFilters" :item="item" />
-    <!-- <price-prediction v-if="showPredictedPrice" class="mb-4" :item="item" /> -->
-    <!-- <price-trend v-else :item="item" :filters="itemFilters" /> -->
     <price-trend :item="item" :filters="itemFilters" />
     <filters-block
       ref="filtersComponent"
@@ -79,7 +77,6 @@ import { apiToSatisfySearch, getTradeEndpoint } from "./trade/common";
 import PriceTrend from "./trends/PriceTrend.vue";
 import FiltersBlock from "./filters/FiltersBlock.vue";
 import { createPresets } from "./filters/create-presets";
-import PricePrediction from "./price-prediction/PricePrediction.vue";
 import StackValue from "./stack-value/StackValue.vue";
 import FilterName from "./filters/FilterName.vue";
 import Tip from "../help/Tip.vue";
@@ -100,7 +97,6 @@ export default defineComponent({
   name: "CheckedItem",
   emits: ["item-editor-selection"],
   components: {
-    PricePrediction,
     TradeListing,
     TradeBulk,
     TradeLinks,

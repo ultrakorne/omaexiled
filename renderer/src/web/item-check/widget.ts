@@ -1,5 +1,4 @@
 import type { Widget } from "../overlay/widgets.js";
-import type { MapCheckConfig } from "../map-check/common.js";
 
 export interface ItemCheckWidget extends Widget {
   hotkey: string | null;
@@ -10,4 +9,15 @@ export interface ItemCheckWidget extends Widget {
   samePricedKey: string | null;
   samePricedType: "price" | "both";
   maps: MapCheckConfig;
+}
+
+// Map check is not ported; its settings stay in the config so that imported
+// EE2 configs keep them.
+export interface MapCheckConfig {
+  profile: number;
+  showNewStats: boolean;
+  selectedStats: Array<{
+    matcher: string;
+    decision: string;
+  }>;
 }

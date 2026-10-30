@@ -29,6 +29,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { Host } from "@/web/background/IPC";
 
 const props = defineProps<{
   position: { x: number; y: number };
@@ -36,8 +37,8 @@ const props = defineProps<{
 
 const relativePos = computed(() => {
   return {
-    top: `calc(${props.position.y - window.screenY}px - 2.5rem)`,
-    left: `calc(${props.position.x - window.screenX}px - 2.5rem)`,
+    top: `calc(${props.position.y - Host.screenY}px - 2.5rem)`,
+    left: `calc(${props.position.x - Host.screenX}px - 2.5rem)`,
   };
 });
 </script>

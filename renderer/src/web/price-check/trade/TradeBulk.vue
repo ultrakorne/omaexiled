@@ -178,7 +178,6 @@ import { PriceCheckWidget } from "@/web/overlay/interfaces";
 import { artificialSlowdown } from "./artificial-slowdown";
 import OnlineFilter from "./OnlineFilter.vue";
 import TradeLinks from "./TradeLinks.vue";
-import { Host } from "@/web/background/IPC";
 import { useBulkApi } from "./bulk-api";
 
 const slowdown = artificialSlowdown(900);
@@ -275,11 +274,8 @@ export default defineComponent({
       showSeller: computed(() => widget.value.showSeller),
       makeTradeLink,
       openTradeLink() {
-        if (widget.value.builtinBrowser && Host.isElectron) {
-          showBrowser(makeTradeLink(["mirror"]));
-        } else {
-          window.open(makeTradeLink(["mirror"]));
-        }
+        // OmaExiled: error recovery (captcha, login) in the in-app browser
+        showBrowser(makeTradeLink(["mirror"]));
       },
     };
   },

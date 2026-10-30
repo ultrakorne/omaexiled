@@ -1,11 +1,14 @@
 <template>
   <div id="app" class="text-sm font-poe-sc">
-    <OverlayWindow />
+    <SettingsPage v-if="Host.mode === 'settings'" />
+    <OverlayWindow v-else />
   </div>
 </template>
 
 <script setup lang="ts">
 import OverlayWindow from "./overlay/OverlayWindow.vue";
+import SettingsPage from "./settings/SettingsPage.vue";
+import { Host } from "./background/IPC";
 </script>
 
 <style lang="postcss">

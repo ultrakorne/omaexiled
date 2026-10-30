@@ -48,7 +48,6 @@ export interface PriceCheckWidget extends Widget {
   lockedInitialSearch: boolean;
   activateStockFilter: boolean;
   showCursor: boolean;
-  requestPricePrediction: boolean;
   builtinBrowser: boolean;
   rememberCurrency: boolean;
   defaultAllSelected: boolean;
@@ -63,26 +62,11 @@ export interface PriceCheckWidget extends Widget {
   };
 }
 
-export interface StopwatchWidget extends Widget {
-  anchor: Anchor;
-  toggleKey: string | null;
-  resetKey: string | null;
-}
-
-export interface DelveGridWidget extends Widget {
-  toggleKey: string | null;
-}
-
+// Not ported; config migrations still use the type.
 export interface ImageStripWidget extends Widget {
   anchor: Anchor;
   images: Array<{
     id: number;
     url: string;
   }>;
-}
-
-export interface NotepadWidget extends Widget {
-  anchor: Anchor;
-  notepadBody: string;
-  notepadSize: 0 | 1 | 2;
 }

@@ -163,8 +163,8 @@ export default defineComponent({
           payload: {
             clipboard: target.value,
             position: {
-              x: window.screenX + inputRect.x + inputRect.width / 2,
-              y: window.screenY + inputRect.y + inputRect.height / 2,
+              x: Host.screenX + inputRect.x + inputRect.width / 2,
+              y: Host.screenY + inputRect.y + inputRect.height / 2,
             },
             focusOverlay: true,
             target: "price-check",

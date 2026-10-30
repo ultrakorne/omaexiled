@@ -7,11 +7,7 @@
       'flex-row-reverse': clickPosition === 'inventory',
     }"
   >
-    <div
-      v-if="!isBrowserShown"
-      class="layout-column shrink-0"
-      style="width: var(--game-panel)"
-    ></div>
+    <div class="layout-column shrink-0" style="width: var(--game-panel)"></div>
     <div
       id="price-window"
       class="layout-column shrink-0 text-gray-200 pointer-events-auto"
@@ -91,23 +87,9 @@
             :advanced-check="advancedCheck"
           />
         </template>
-        <div v-if="isBrowserShown" class="bg-gray-900 px-6 py-2 truncate">
-          <i18n-t keypath="app.toggle_browser_hint" tag="div">
-            <span class="bg-gray-400 text-gray-900 rounded px-1">{{
-              overlayKey
-            }}</span>
-          </i18n-t>
-        </div>
       </div>
     </div>
-    <webview
-      v-if="isBrowserShown"
-      ref="iframeEl"
-      class="pointer-events-auto flex-1"
-      width="100%"
-      height="100%"
-    />
-    <div v-else class="layout-column flex-1 min-w-0">
+    <div class="layout-column flex-1 min-w-0">
       <div
         class="flex"
         :class="{
@@ -196,7 +178,6 @@ export default defineComponent({
         showSeller: false,
         searchStatRange: 10,
         showCursor: true,
-        requestPricePrediction: false,
         rememberCurrency: false,
         // New Settings EE2
         defaultAllSelected: false,
@@ -262,16 +243,14 @@ export default defineComponent({
       if (e.target !== "price-check") return;
       performance.mark("price-check-event");
 
-      if (Host.isElectron && !e.focusOverlay) {
+      if (Host.isOverlay && !e.focusOverlay) {
         // everything in CSS pixels
+        // OmaExiled: overlay surface coordinates (Host.screenX/Y are 0)
         const width = 28.75 * AppConfig().fontSize;
         const screenX =
-          e.position.x - window.screenX > window.innerWidth / 2
-            ? window.screenX +
-              window.innerWidth -
-              wm.poePanelWidth.value -
-              width
-            : window.screenX + wm.poePanelWidth.value;
+          e.position.x - Host.screenX > window.innerWidth / 2
+            ? Host.screenX + window.innerWidth - wm.poePanelWidth.value - width
+            : Host.screenX + wm.poePanelWidth.value;
         MainProcess.sendEvent({
           name: "OVERLAY->MAIN::track-area",
           payload: {
@@ -280,7 +259,7 @@ export default defineComponent({
             from: e.position,
             area: {
               x: screenX,
-              y: window.screenY,
+              y: Host.screenY,
               width,
               height: window.innerHeight,
             },
@@ -288,7 +267,6 @@ export default defineComponent({
           },
         });
       }
-      closeBrowser();
       wm.show(props.config.wmId);
       checkPosition.value = e.position;
       advancedCheck.value = e.focusOverlay;
@@ -343,58 +321,33 @@ export default defineComponent({
       wm.hide(props.config.wmId);
     });
 
-    watch(
-      () => props.config.wmWants,
-      (state) => {
-        if (state === "hide") {
-          closeBrowser();
-        }
-      },
-    );
-
     const leagues = useLeagues();
-    const title = computed(
-      () => leagues.selectedId.value || "Exiled Exchange 2",
-    );
+    const title = computed(() => leagues.selectedId.value || "OmaExiled");
     const stableOrbCost = computed(() =>
       xchgRate.value ? Math.round(xchgRate.value) : null,
     );
-    const isBrowserShown = computed(() =>
-      props.config.wmFlags.includes("has-browser"),
-    );
-    const overlayKey = computed(() => AppConfig().overlayKey);
     const showCheckPos = computed(
       () => wm.active.value && props.config.showCursor,
     );
     const isLeagueSelected = computed(() => Boolean(leagues.selectedId.value));
     const clickPosition = computed(() => {
-      if (isBrowserShown.value) {
-        return "inventory";
-      } else {
-        return checkPosition.value.x > window.screenX + window.innerWidth / 2
-          ? "inventory"
-          : "stash";
-        // or {chat, vendor, center of screen}
-      }
-    });
-
-    watch(isBrowserShown, (isShown) => {
-      if (isShown) {
-        wm.setFlag(props.config.wmId, "hide-on-blur", false);
-        wm.setFlag(props.config.wmId, "invisible-on-blur", true);
-      } else {
-        wm.setFlag(props.config.wmId, "invisible-on-blur", false);
-        wm.setFlag(props.config.wmId, "hide-on-blur", true);
-      }
+      return checkPosition.value.x > Host.screenX + window.innerWidth / 2
+        ? "inventory"
+        : "stash";
+      // or {chat, vendor, center of screen}
     });
 
     function closePriceCheck() {
-      if (AppConfig().overlayAlwaysClose) {
+      if (Host.isOverlay && !wm.active.value) {
+        // OmaExiled: the panel takes clicks while the overlay is inactive
+        // (quick check), when focus-game would not hide it
+        wm.hide(props.config.wmId);
+      } else if (AppConfig().overlayAlwaysClose) {
         Host.sendEvent({
           name: "OVERLAY->MAIN::focus-game",
           payload: undefined,
         });
-      } else if (isBrowserShown.value || !Host.isElectron) {
+      } else if (!Host.isOverlay) {
         wm.hide(props.config.wmId);
       } else {
         Host.sendEvent({
@@ -410,17 +363,10 @@ export default defineComponent({
       wm.show(settings.wmId);
     }
 
-    const iframeEl = shallowRef<HTMLIFrameElement | null>(null);
-
+    // OmaExiled: EE2's <webview> is replaced by the host's in-app browser
+    // window, which shares its cookies (captcha, login) with the proxy.
     function showBrowser(url: string) {
-      wm.setFlag(props.config.wmId, "has-browser", true);
-      nextTick(() => {
-        iframeEl.value!.src = url;
-      });
-    }
-
-    function closeBrowser() {
-      wm.setFlag(props.config.wmId, "has-browser", false);
+      Host.sendEvent({ name: "CLIENT->MAIN::open-browser", payload: { url } });
     }
 
     provide<(url: string) => void>("builtin-browser", showBrowser);
@@ -430,8 +376,6 @@ export default defineComponent({
     return {
       t,
       clickPosition,
-      isBrowserShown,
-      iframeEl,
       closePriceCheck,
       title,
       stableOrbCost,
@@ -442,7 +386,6 @@ export default defineComponent({
       item,
       advancedCheck,
       handleIdentification,
-      overlayKey,
       isLeagueSelected,
       openLeagueSelection,
     };

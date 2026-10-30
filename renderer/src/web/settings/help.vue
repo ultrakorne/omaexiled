@@ -68,7 +68,7 @@ import { useI18nNs } from "@/web/i18n";
 import UiCheckbox from "@/web/ui/UiCheckbox.vue";
 import { configModelValue, configProp } from "./utils";
 import Tip from "../help/Tip.vue";
-import { TIP_COUNT } from "../help/tips";
+import { TIPS } from "../help/tips";
 
 export default defineComponent({
   name: "settings.help",
@@ -76,18 +76,14 @@ export default defineComponent({
   props: configProp(),
   setup(props) {
     const { t } = useI18nNs("settings");
-    const currentTip = ref(1);
+    const currentTip = ref(TIPS[0]);
     const showNext = () => {
-      currentTip.value += 1;
-      if (currentTip.value > TIP_COUNT) {
-        currentTip.value = 1;
-      }
+      const idx = TIPS.indexOf(currentTip.value) + 1;
+      currentTip.value = TIPS[idx % TIPS.length];
     };
     const showPrev = () => {
-      currentTip.value -= 1;
-      if (currentTip.value < 1) {
-        currentTip.value = TIP_COUNT;
-      }
+      const idx = TIPS.indexOf(currentTip.value) - 1;
+      currentTip.value = TIPS[(idx + TIPS.length) % TIPS.length];
     };
 
     return {
