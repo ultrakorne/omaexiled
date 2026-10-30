@@ -7,4 +7,5 @@ dist/
 .idea
 .vscode
 host/build/
+tools/fake-poe/build/
 *.index.bin
