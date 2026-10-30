@@ -26,8 +26,9 @@ the keys work as usual.
 - [Awakened PoE Trade](https://github.com/SnosMe/awakened-poe-trade) by
   SnosMe (MIT), which EE2 is a fork of.
 
-OmaExiled is MIT licensed as well (see `LICENSE`). It is not affiliated with
-or endorsed by Grinding Gear Games.
+OmaExiled is MIT licensed as well (see `LICENSE`); the code taken from EE2
+keeps its original MIT notice in `renderer/LICENSE`. It is not affiliated
+with or endorsed by Grinding Gear Games.
 
 ## Requirements
 
@@ -37,9 +38,7 @@ Omarchy with Hyprland 0.56 or newer, plus:
 sudo pacman -S --needed layer-shell-qt qt6-webengine bun nodejs npm base-devel
 ```
 
-`layer-shell-qt` is the one package a fresh Omarchy never has. The others may
-already be installed (Node.js from mise works too). Everything else OmaExiled
-uses (`wl-clipboard`, `jq`, `xdg-open`, omarchy-shell) is part of Omarchy.
+`layer-shell-qt` is the one package a fresh Omarchy never has. 
 
 ## Install
 
@@ -77,10 +76,6 @@ Hover an item in game and press a hotkey:
 | Chat: `@last ty`, `/invite @last`, `/tradewith @last`, `/hideout @last` | none | Set a key in Settings, Chat |
 | Stash search | none | Add searches and keys in Settings, Stash search |
 
-All of them can be changed in the settings. While OmaExiled is stopped they
-are plain keys again: the service switches them off when it stops, and if
-OmaExiled hangs or is killed outside the service they switch themselves off
-15 seconds later.
 
 **Two more ways to open a price check**, both off by default, in Settings,
 Price check. Both open a locked price check (like `Ctrl+Alt+D`) and only act
@@ -116,52 +111,12 @@ match the language setting.
 ## Path of Exile 2 settings
 
 - **Display mode.** *Windowed Fullscreen* (borderless, full screen) is tested
-  and works. Plain *Fullscreen* is untested since the click fix.
+  and works. 
 - **Confine mouse to window** can stay off; OmaExiled already copes with the
   confinement Wine applies (see `docs/GOTCHAS.md`).
 - Keep the "show advanced item descriptions" key on its default (`Alt`) unless
   you need to change it; OmaExiled reads it from the game's config to copy
   items with full mod text.
-
-## Troubleshooting
-
-Known pitfalls (clicks going through the panel, `v` typed instead of a
-paste, the Character panel opening on `Ctrl+D`, searches without a click)
-and their fixes are in [`docs/GOTCHAS.md`](docs/GOTCHAS.md).
-
-```bash
-omaexiled status          # service, bar widget and backend state
-omaexiled logs            # follow the log (backend, overlay host)
-omaexiled ctl status      # what the backend sees (game, overlay, hotkeys, league)
-omaexiled ctl             # every control command
-```
-
-- **A hotkey does nothing.** Check that the game window is focused and that
-  `omaexiled ctl status` shows the game. The log names every hotkey that
-  another Hyprland bind also uses; Hyprland runs both. Known ones: `F9` is
-  Omarchy's push-to-talk dictation when voxtype is installed (give `/exit`
-  another key in Settings, Chat), and any personal bind on `Ctrl+Alt+D`.
-- **The panel shows but clicks go to the game.** Turn off "Confine mouse to
-  window" in the game, then try Windowed instead of Windowed Fullscreen.
-- **Trade search fails with a captcha / Cloudflare page.** Open the in-app
-  browser (`omaexiled ctl open-browser https://www.pathofexile.com/trade2`),
-  pass the check or log in there, close it and search again.
-- **No bar icon.** `omarchy plugin list | grep omaexiled`, then
-  `omaexiled update-plugin` and
-  `omarchy plugin enable omaexiled --section right --after omarchy.tray`. The
-  shell log is `journalctl --user -t omarchy-shell | grep -i omaexiled`.
-- **The game does not get `Ctrl+D`, `Esc`, ... while OmaExiled is down.** The
-  keys come back by themselves within 15 seconds; `omaexiled disable-binds`
-  gives them back right away.
-- **Quit stays quit.** After **Quit** the service stays stopped until you
-  click **Start OmaExiled** or run `omaexiled start` (with `--autostart` it
-  also starts at the next login).
-- **Developer tools.** `omaexiled ctl devtools overlay` (or `settings`) opens
-  Chromium DevTools for that page.
-
-Files: settings in `~/.config/omaexiled/` (`config.json` is EE2's format),
-runtime sockets in `$XDG_RUNTIME_DIR/omaexiled/`. The UI is served on
-`http://127.0.0.1:8584`.
 
 ## Uninstall
 
