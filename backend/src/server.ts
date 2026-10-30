@@ -161,6 +161,9 @@ export class Server {
     }
     if (url.pathname.startsWith("/proxy/")) {
       if (!this.checkLocal(req, true)) return new Response(null, { status: 403 });
+      // Bun closes a request idle for 10 s; the trade API can be slower
+      // (league start). The proxy's own 60 s timeout applies instead.
+      server.timeout(req, 0);
       return this.opts.proxy(req);
     }
     if (!this.checkLocal(req, false)) return new Response("Forbidden", { status: 403 });

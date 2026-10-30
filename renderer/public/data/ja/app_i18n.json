@@ -304,7 +304,7 @@
     "fix_complex_query": "設定で\"Use pseudo mods\"を無効にするか、組み込みブラウザでログインしてください"
   },
   "settings": {
-    "title": "設定 - Exiled Exchange 2",
+    "title": "設定 - OmaExiled",
     "language": "言語",
     "private_league": "またはプライベートリーグ",
     "account_name": "アカウント名",

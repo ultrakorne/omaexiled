@@ -351,7 +351,7 @@
     "added_augments": "Added Augment Cost:"
   },
   "settings": {
-    "title": "Settings - Exiled Exchange 2",
+    "title": "Settings - OmaExiled",
     "language": "Language",
     "private_league": "or Private League",
     "account_name": "Account name",
@@ -439,7 +439,10 @@
     "core_currency": "Primary base currency:",
     "show_volume": "Show Currency Exchange volume per hour:",
     "warn_advanced": "Advanced settings, don't change unless you are experiencing issues",
-    "initial_delay": "Initial clipboard check delay(after copy-item keybind is pressed)"
+    "initial_delay": "Initial clipboard check delay(after copy-item keybind is pressed)",
+    "game_copy_bind": "Also open on the game's own Ctrl+Alt+C",
+    "clipboard_watch": "Open on any copied item (clipboard watch)",
+    "copy_triggers_hint": "Items copied without the advanced descriptions key (e.g. plain Ctrl+C) lose mod details, so the check is less accurate."
   },
   "poe2_new": {
     "beta_warning": "This is in BETA for POE2, things will not work always as expected.",

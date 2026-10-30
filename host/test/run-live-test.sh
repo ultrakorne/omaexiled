@@ -113,13 +113,13 @@ FAKE_POE_LOG=$tmp/fake-poe.log "$fake_poe" --fullscreen >"$tmp/fake-poe.out" 2>&
 poe_pid=$!
 XDG_DATA_HOME=$tmp/data XDG_CACHE_HOME=$tmp/cache \
   bun "$repo/host/test/mock-backend.ts" --port "$port" --socket "$socket" --spawn "$host_bin" \
-  >"$tmp/mock.log" 2>&1 &
+  --prepare "$mon:${mw}x${mh}" >"$tmp/mock.log" 2>&1 &
 mock_pid=$!
 
 check "host says hello with a user agent" wait_for 15 said_hello
 check "overlay page preloaded" wait_for 15 logged "overlay page loaded"
 renderer=$(received log | jq -r '.[].msg.message' | grep 'overlay page loaded' | tail -1 | sed 's/.*pid \([0-9]*\).*/\1/')
-check "preloaded page has the monitor size while hidden (warm-up)" wait_for 5 page_size_is "$mw" "$mh"
+check "preloaded page has the overlay.prepare size while hidden (warm-up)" wait_for 5 page_size_is "$mw" "$mh"
 check "warm-up left no surface and reported nothing" bash -c "[[ \$(hyprctl layers -j | jq '[.[].levels[\"3\"][]? | select(.pid == $(host_pid))] | length') == 0 ]]"
 check "... and was never reported as mapped" never_mapped
 hyprctl dispatch "hl.dsp.focus({ window = \"pid:$poe_pid\" })" >/dev/null
@@ -178,10 +178,27 @@ check "unknown output is logged" logged NO-SUCH-OUTPUT
 check "... and the surface kept" layer_is "[[300,200,1000,600]]"
 send '{"type":"overlay.hide"}'; sleep 0.5
 
+# --- overlay.prepare: the hidden page takes the game window's size -------------
+reset
+send "{\"type\":\"overlay.prepare\",\"output\":\"$mon\",\"rect\":{\"x\":100,\"y\":80,\"width\":1200,\"height\":700}}"
+check "overlay.prepare lays the hidden page out at the game rect" wait_for 5 page_size_is 1200 700
+check "... leaves no surface" wait_for 3 layer_is "[]"
+check "... and is never reported as mapped" never_mapped
+send '{"type":"overlay.prepare","output":"NO-SUCH-OUTPUT","rect":{"x":0,"y":0,"width":10,"height":10}}'
+check "overlay.prepare to an unknown output is logged" wait_for 3 logged "overlay.prepare: no output"
+send "{\"type\":\"overlay.show\",\"output\":\"$mon\",\"rect\":{\"x\":300,\"y\":200,\"width\":1000,\"height\":600}}"
+check "overlay.show after a prepare maps as usual" wait_for 5 mapped
+send "{\"type\":\"overlay.prepare\",\"output\":\"$mon\",\"rect\":{\"x\":0,\"y\":0,\"width\":$mw,\"height\":$mh}}"; sleep 0.5
+check "overlay.prepare while shown keeps the surface" layer_is "[[300,200,1000,600]]"
+check "... the page size" wait_for 3 page_size_is 1000 600
+check "... and the mapped state" state_is "[true,false]"
+send '{"type":"overlay.hide"}'; sleep 0.5
+
 reset
 check "overlay renderer process killed" kill -9 "$renderer"
 check "overlay page reloads after its renderer is killed" wait_for 15 logged "overlay page loaded"
 check "reloaded page warmed up again (got its size while hidden)" wait_for 5 count_gt0 resize
+check "... at the overlay.prepare rect remembered while shown" wait_for 5 page_size_is "$mw" "$mh"
 check "... and stays unmapped" layer_is "[]"
 
 # --- settings window -------------------------------------------------------------

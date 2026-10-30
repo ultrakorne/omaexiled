@@ -239,33 +239,59 @@ export default defineComponent({
     const advancedCheck = shallowRef(false);
     const checkPosition = shallowRef({ x: 1, y: 1 });
 
+    // OmaExiled: the hidden overlay page can still have the size of its
+    // previous mapping when item-text arrives (the surface is resized to the
+    // game window only when it is shown), so the panel side and the tracked
+    // area use the reactive surface size, and the area is sent again when
+    // that size changes while a hold-mode check is shown.
+    let trackFrom: { x: number; y: number } | null = null;
+
+    function sendTrackArea(from: { x: number; y: number }) {
+      // everything in CSS pixels
+      // OmaExiled: overlay surface coordinates (Host.screenX/Y are 0)
+      const { width: innerWidth, height: innerHeight } = wm.size.value;
+      const width = 28.75 * AppConfig().fontSize;
+      const screenX =
+        from.x - Host.screenX > innerWidth / 2
+          ? Host.screenX + innerWidth - wm.poePanelWidth.value - width
+          : Host.screenX + wm.poePanelWidth.value;
+      MainProcess.sendEvent({
+        name: "OVERLAY->MAIN::track-area",
+        payload: {
+          holdKey: props.config.hotkeyHold,
+          closeThreshold: 2.5 * AppConfig().fontSize,
+          from,
+          area: {
+            x: screenX,
+            y: Host.screenY,
+            width,
+            height: innerHeight,
+          },
+          dpr: window.devicePixelRatio,
+        },
+      });
+    }
+
+    watch(wm.size, () => {
+      if (trackFrom && props.config.wmWants === "show") {
+        sendTrackArea(trackFrom);
+      }
+    });
+    watch(
+      () => props.config.wmWants,
+      (wmWants) => {
+        if (wmWants !== "show") trackFrom = null;
+      },
+    );
+
     MainProcess.onEvent("MAIN->CLIENT::item-text", (e) => {
       if (e.target !== "price-check") return;
       performance.mark("price-check-event");
 
+      trackFrom = null;
       if (Host.isOverlay && !e.focusOverlay) {
-        // everything in CSS pixels
-        // OmaExiled: overlay surface coordinates (Host.screenX/Y are 0)
-        const width = 28.75 * AppConfig().fontSize;
-        const screenX =
-          e.position.x - Host.screenX > window.innerWidth / 2
-            ? Host.screenX + window.innerWidth - wm.poePanelWidth.value - width
-            : Host.screenX + wm.poePanelWidth.value;
-        MainProcess.sendEvent({
-          name: "OVERLAY->MAIN::track-area",
-          payload: {
-            holdKey: props.config.hotkeyHold,
-            closeThreshold: 2.5 * AppConfig().fontSize,
-            from: e.position,
-            area: {
-              x: screenX,
-              y: Host.screenY,
-              width,
-              height: window.innerHeight,
-            },
-            dpr: window.devicePixelRatio,
-          },
-        });
+        trackFrom = e.position;
+        sendTrackArea(e.position);
       }
       wm.show(props.config.wmId);
       checkPosition.value = e.position;
@@ -331,7 +357,8 @@ export default defineComponent({
     );
     const isLeagueSelected = computed(() => Boolean(leagues.selectedId.value));
     const clickPosition = computed(() => {
-      return checkPosition.value.x > Host.screenX + window.innerWidth / 2
+      // OmaExiled: reactive surface size, see sendTrackArea
+      return checkPosition.value.x > Host.screenX + wm.size.value.width / 2
         ? "inventory"
         : "stash";
       // or {chat, vendor, center of screen}
@@ -358,6 +385,13 @@ export default defineComponent({
     }
 
     function openLeagueSelection() {
+      if (Host.isOverlay && !wm.active.value) {
+        // OmaExiled: the panel takes clicks while the overlay is inactive
+        // (quick check), where the settings widget would stay invisible;
+        // open the settings window instead
+        Host.sendEvent({ name: "CLIENT->MAIN::open-settings", payload: {} });
+        return;
+      }
       const settings = wm.widgets.value.find((w) => w.wmType === "settings")!;
       wm.setFlag(settings.wmId, `settings::widget=${props.config.wmId}`, true);
       wm.show(settings.wmId);

@@ -31,24 +31,30 @@ Overlay::Overlay(QQuickWindow *window, QObject *parent)
   applyInput();
 }
 
-bool Overlay::show(const QString &output, const QRect &rect) {
-  QScreen *screen = nullptr;
-  for (QScreen *s : QGuiApplication::screens()) {
-    if (s->name() == output) {
-      screen = s;
-      break;
-    }
-  }
-  if (!screen) {
-    emit warning(QStringLiteral("overlay.show: no output named \"%1\"").arg(output));
-    return false;
-  }
-
+// Layer surface margins that make a full-screen anchored surface cover rect
+// (monitor-local); an invalid rect means the whole monitor.
+static QMargins marginsFor(const QScreen *screen, const QRect &rect) {
   const QSize size = screen->geometry().size();
   const QRect r = rect.isValid() ? rect : QRect(QPoint(0, 0), size);
-  const QMargins margins(qMax(0, r.left()), qMax(0, r.top()),
-                         qMax(0, size.width() - r.left() - r.width()),
-                         qMax(0, size.height() - r.top() - r.height()));
+  return QMargins(qMax(0, r.left()), qMax(0, r.top()),
+                  qMax(0, size.width() - r.left() - r.width()),
+                  qMax(0, size.height() - r.top() - r.height()));
+}
+
+QScreen *Overlay::screenNamed(const QString &output, const QString &command) {
+  for (QScreen *s : QGuiApplication::screens()) {
+    if (s->name() == output) return s;
+  }
+  emit warning(QStringLiteral("%1: no output named \"%2\"").arg(command, output));
+  return nullptr;
+}
+
+bool Overlay::show(const QString &output, const QRect &rect) {
+  QScreen *screen = screenNamed(output, QStringLiteral("overlay.show"));
+  if (!screen) return false;
+  const QMargins margins = marginsFor(screen, rect);
+  m_targetScreen = screen;
+  m_targetMargins = margins;
 
   // A real show takes over a warm-up surface (still mapped with keyboard
   // none; the first-frame step below runs as usual).
@@ -70,12 +76,25 @@ bool Overlay::show(const QString &output, const QRect &rect) {
   return true;
 }
 
+bool Overlay::prepare(const QString &output, const QRect &rect) {
+  QScreen *screen = screenNamed(output, QStringLiteral("overlay.prepare"));
+  if (!screen) return false;
+  m_targetScreen = screen;
+  m_targetMargins = marginsFor(screen, rect);
+  return screen != m_screen || m_targetMargins != m_margins;
+}
+
 void Overlay::warmUp() {
-  if (m_window->isVisible()) return;
-  QScreen *screen = m_screen ? m_screen.data() : QGuiApplication::primaryScreen();
+  QScreen *screen = m_targetScreen ? m_targetScreen.data() : QGuiApplication::primaryScreen();
   if (!screen) return;
+  const QMargins margins = m_targetScreen ? m_targetMargins : QMargins();
+  if (m_window->isVisible()) {
+    // A shown overlay keeps its surface; a warm-up already there is enough.
+    if (!m_warmingUp || (screen == m_screen && margins == m_margins)) return;
+    unmap(); // start over at the new geometry
+  }
   m_warmingUp = true;
-  map(screen, m_screen ? m_margins : QMargins());
+  map(screen, margins);
 }
 
 void Overlay::map(QScreen *screen, const QMargins &margins) {

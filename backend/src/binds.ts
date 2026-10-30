@@ -5,6 +5,10 @@
 // user's binds on the same combo). The callback passes the key through
 // unless the backend is alive, PoE2 is the active window and the combo maps
 // to an action; then it posts `custom>>omaexiled:<id>` on socket2.
+//
+// "Alive" is a lease: the backend renews `_G.omaexiled.lease` (os.time()
+// seconds) every LEASE_RENEW ms, so a killed or hung backend stops eating
+// PoE2's keys within LEASE_SECONDS.
 import fs from "node:fs";
 import path from "node:path";
 import type { ShortcutAction } from "../../ipc/types";
@@ -16,6 +20,8 @@ export const GAME_CLASS = "steam_app_2694490";
 export const LAYER_NAMESPACE = "omaexiled";
 export const SETTINGS_TITLE = "OmaExiled Settings";
 export const BROWSER_TITLE = "OmaExiled Browser";
+export const LEASE_SECONDS = 15;
+export const LEASE_RENEW = 5000;
 
 export type BoundAction =
   | ShortcutAction["action"]
@@ -157,10 +163,11 @@ local function is_poe(w)
 end
 
 -- Runs inside Hyprland's input path: no blocking calls. { ok = false }
--- passes the key to the focused window (auto_consuming).
+-- passes the key to the focused window (auto_consuming). M.lease is renewed
+-- by the backend every few seconds; an expired lease means it is gone.
 local function handler(combo)
   return function()
-    local a = M.enabled and M.actions[combo]
+    local a = M.enabled and (M.lease or 0) >= os.time() and M.actions[combo]
     if not a or (a.panel and not M.panel) or not is_poe(hl.get_active_window()) then
       return { ok = false }
     end
@@ -235,6 +242,7 @@ export class Binds {
   private current: Bind[] = [];
   private byId = new Map<string, Bind>();
   private installedLua = "";
+  private leaseTimer?: ReturnType<typeof setInterval>;
   readonly file: string;
 
   constructor(
@@ -276,8 +284,30 @@ export class Binds {
       this.logger.write(`error [Shortcuts] Failed to install Hyprland binds: ${(e as Error).message}`);
       return false;
     }
+    await this.renewLease();
     await this.logConflicts();
     return true;
+  }
+
+  // Keeps the binds active while the backend runs (see the file comment).
+  startLease(intervalMs = LEASE_RENEW) {
+    this.stopLease();
+    if (!this.hypr.available) return;
+    this.leaseTimer = setInterval(() => this.renewLease(), intervalMs);
+  }
+
+  stopLease() {
+    clearInterval(this.leaseTimer);
+    this.leaseTimer = undefined;
+  }
+
+  async renewLease() {
+    if (!this.hypr.available) return;
+    try {
+      await this.hypr.eval(`local M = rawget(_G, "omaexiled") if M then M.lease = os.time() + ${LEASE_SECONDS} end`);
+    } catch {
+      // Hyprland busy or reloading: the next tick (or install) renews
+    }
   }
 
   // Replaces EE2's "already registered by another application": Hyprland
@@ -318,10 +348,11 @@ export class Binds {
 
   // On shutdown: every bind passes its key through again.
   async disable() {
+    this.stopLease();
     if (!this.hypr.available) return;
     try {
       await this.hypr.eval(
-        `local M = rawget(_G, "omaexiled") if M then M.enabled = false M.panel = false for _, b in pairs(M.binds) do b:set_enabled(false) end end`,
+        `local M = rawget(_G, "omaexiled") if M then M.enabled = false M.panel = false M.lease = nil for _, b in pairs(M.binds) do b:set_enabled(false) end end`,
       );
     } catch {}
     this.installedLua = "";

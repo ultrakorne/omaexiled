@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
+import { hideAll } from "tippy.js";
 import type { InputRect } from "@ipc/types";
 import { Host } from "@/web/background/IPC";
 
@@ -19,6 +20,12 @@ import { Host } from "@/web/background/IPC";
 //
 // Recomputed on the next frame after DOM, size, animation or `active`
 // changes; sent only when it differs from the last send.
+//
+// An interactive tippy hides only on a mousemove outside it, which the page
+// no longer gets once the pointer is over the game (outside the region), so
+// while inactive the poppers are hidden when the pointer has left the
+// surface. The delay lets the pointer cross a gap between a reference and
+// its popper that lies outside the region.
 export function useInputRegion(
   root: Ref<HTMLElement | null>,
   active: Ref<boolean>,
@@ -31,6 +38,19 @@ export function useInputRegion(
 
   const resizeObserver = new ResizeObserver(schedule);
   const mutationObserver = new MutationObserver(schedule);
+
+  let leaveTimer = 0;
+  function onMouseOut(e: MouseEvent) {
+    // no relatedTarget: the pointer left the page
+    if (e.relatedTarget != null || active.value) return;
+    clearTimeout(leaveTimer);
+    leaveTimer = window.setTimeout(() => {
+      if (!active.value) hideAll({ duration: 0 });
+    }, 300);
+  }
+  function onMouseOver() {
+    clearTimeout(leaveTimer);
+  }
 
   function schedule() {
     if (scheduled) return;
@@ -141,6 +161,8 @@ export function useInputRegion(
     window.addEventListener("resize", schedule);
     document.addEventListener("animationend", schedule, true);
     document.addEventListener("transitionend", schedule, true);
+    document.addEventListener("mouseout", onMouseOut);
+    document.addEventListener("mouseover", onMouseOver);
     schedule();
   });
 
@@ -150,10 +172,13 @@ export function useInputRegion(
     window.removeEventListener("resize", schedule);
     document.removeEventListener("animationend", schedule, true);
     document.removeEventListener("transitionend", schedule, true);
+    document.removeEventListener("mouseout", onMouseOut);
+    document.removeEventListener("mouseover", onMouseOver);
     stopReconnect();
     scheduled = false;
     cancelAnimationFrame(frame);
     clearTimeout(timer);
+    clearTimeout(leaveTimer);
   });
 
   watch(active, schedule);

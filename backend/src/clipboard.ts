@@ -12,20 +12,41 @@ const RESTORE_AFTER = 300;
 // EE2's throttle: a chat / stash action within this window of the previous
 // one is dropped ("Too many actions" disconnects).
 const THROTTLE = 120;
+// wl-paste blocks while the selection owner (Wine's X11 bridge) does not
+// finish the transfer; never let one read hold up the poll or a macro.
+const READ_TIMEOUT = 1000;
 
 export interface ClipboardIO {
   read(): Promise<string>;
   write(text: string): Promise<void>;
 }
 
-export const wlClipboard: ClipboardIO = {
-  async read() {
-    const proc = Bun.spawn(["wl-paste", "--no-newline", "--type", "text"], {
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+// Runs `argv` and resolves with its stdout, or "" on failure or after
+// `timeoutMs` (the process is killed; a child it left holding the pipe no
+// longer matters).
+export async function readCommand(argv: string[], timeoutMs = READ_TIMEOUT): Promise<string> {
+  const proc = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  const result = Promise.all([new Response(proc.stdout).text(), proc.exited]).catch(() => null);
+  try {
+    const res = await Promise.race([result, deadline]);
+    if (!res) {
+      proc.kill();
+      return "";
+    }
+    const [text, code] = res;
     return code === 0 ? text : "";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export const wlClipboard: ClipboardIO = {
+  read() {
+    return readCommand(["wl-paste", "--no-newline", "--type", "text"]);
   },
   async write(text: string) {
     // wl-copy forks a child that serves the selection; don't keep its pipes.
@@ -127,7 +148,12 @@ export class HostClipboard {
       (textBefore) =>
         new Promise<string>((resolve, reject) => {
           const poll = async () => {
-            const textAfter = await this.io.read();
+            // A failed read counts as "nothing yet": the poll must always
+            // settle, or every later price check waits on it.
+            let textAfter = "";
+            try {
+              textAfter = await this.io.read();
+            } catch {}
 
             if (isPoeItem(textAfter)) {
               if (this.shouldRestore) {
@@ -169,12 +195,15 @@ export class HostClipboard {
       return false;
     }
 
+    let saved: string | undefined;
     this.busy = true;
     try {
-      const saved = await this.takeSaved();
+      saved = await this.takeSaved();
       await cb((text) => this.writeOwn(text));
-      this.scheduleRestore(saved, RESTORE_AFTER);
     } finally {
+      // also when sending the keys failed: the macro text must not replace
+      // the user's clipboard for good
+      if (saved !== undefined) this.scheduleRestore(saved, RESTORE_AFTER);
       this.busy = false;
       this.busyUntil = Date.now() + THROTTLE;
       this.ownUntil = Math.max(this.ownUntil, Date.now() + RESTORE_AFTER + 200);

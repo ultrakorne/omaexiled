@@ -162,6 +162,8 @@ export const defaultConfigMock = (overrides: Partial<Config> = {}) => {
     tipsFrequency: TipsFrequency.Always,
     readClientLog: false,
     hideOverlayOnBlur: false,
+    gameCopyBind: false,
+    clipboardWatch: false,
   };
 
   mockConfig = { ...defaultConfig, ...overrides };

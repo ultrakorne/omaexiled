@@ -74,7 +74,23 @@ Hover an item in game and press a hotkey:
 | Chat: `@last ty`, `/invite @last`, `/tradewith @last`, `/hideout @last` | none | Set a key in Settings, Chat |
 | Stash search | none | Add searches and keys in Settings, Stash search |
 
-All of them can be changed in the settings.
+All of them can be changed in the settings. While OmaExiled is stopped they
+are plain keys again: the service switches them off when it stops, and if
+OmaExiled hangs or is killed outside the service they switch themselves off
+15 seconds later.
+
+**Two more ways to open a price check**, both off by default, in Settings,
+Price check. Both open a locked price check (like `Ctrl+Alt+D`) and only act
+while the game is focused:
+
+- **Also open on the game's own Ctrl+Alt+C**: the game's copy key
+  (`Ctrl+Alt+C`, or `Ctrl` + your advanced-descriptions key + `C`) copies the
+  item as usual and also opens the price check. The item stays on your
+  clipboard.
+- **Open on any copied item (clipboard watch)**: every item the game copies,
+  however you copied it, opens a price check. An item copied without the
+  advanced-descriptions key (plain `Ctrl+C`) lacks the mod details, so the
+  price check may miss or misread mods.
 
 **Bar icon.** Dim while OmaExiled is stopped, normal while it runs, accent
 colored while Path of Exile 2 is open.
@@ -89,9 +105,10 @@ colored while Path of Exile 2 is open.
 A fullscreen game covers the bar. To open the menu from a key instead, bind
 `omarchy-shell shell toggle omaexiled` in your Hyprland bindings.
 
-**Settings** open in a normal window: from the bar, or in game by pressing
-the overlay key (`Shift+Space`) and clicking the cog. Pick your league there
-first; the game language must match the language setting.
+**Settings** open in a normal window from the bar. In game, press the overlay
+key (`Shift+Space`) and click the cog: the same settings open as a panel
+inside the overlay. Pick your league there first; the game language must
+match the language setting.
 
 ## Path of Exile 2 settings
 
@@ -127,6 +144,9 @@ omaexiled ctl             # every control command
   `omaexiled update-plugin` and
   `omarchy plugin enable omaexiled --section right --after omarchy.tray`. The
   shell log is `journalctl --user -t omarchy-shell | grep -i omaexiled`.
+- **The game does not get `Ctrl+D`, `Esc`, ... while OmaExiled is down.** The
+  keys come back by themselves within 15 seconds; `omaexiled disable-binds`
+  gives them back right away.
 - **Quit stays quit.** After **Quit** the service stays stopped until you
   click **Start OmaExiled**, run `systemctl --user start omaexiled`, or log in
   again.
@@ -143,7 +163,8 @@ runtime sockets in `$XDG_RUNTIME_DIR/omaexiled/`. The UI is served on
 omaexiled uninstall
 ```
 
-Stops and removes the service, the bar widget and `~/.local/bin/omaexiled`.
+Stops and removes the service (its hotkeys are switched off right away), the
+bar widget and `~/.local/bin/omaexiled`.
 Your settings in `~/.config/omaexiled/` stay; delete that folder to remove
 them too. Then delete the checkout.
 

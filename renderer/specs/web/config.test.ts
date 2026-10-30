@@ -113,7 +113,7 @@ function expectValid(config: Config) {
   expect(new Set(ids).size).toBe(ids.length);
   // OverlayWindow's topmostWidget needs a numeric z-order
   expect(config.widgets.some((w) => typeof w.wmZorder === "number")).toBe(true);
-  expect(config.configVersion).toBe(36);
+  expect(config.configVersion).toBe(37);
 }
 
 function hostConfig(config: Config) {
@@ -136,6 +136,8 @@ describe("defaultConfig", () => {
       [6, "item-check"],
     ]);
     expect(itemCheck(config).hotkey).toBe("Alt + D");
+    expect(config.gameCopyBind).toBe(false);
+    expect(config.clipboardWatch).toBe(false);
     expectValid(upgradeConfig(config));
   });
 });
@@ -154,6 +156,28 @@ describe("upgradeConfig", () => {
     ]);
     expect(config.hideOverlayOnBlur).toBe(false);
     expect(itemCheck(config).hotkey).toBe("Alt + D");
+    expect(config.gameCopyBind).toBe(false);
+    expect(config.clipboardWatch).toBe(false);
+  });
+
+  it("adds the copy triggers to a configVersion 36 config, off", () => {
+    const v36: any = defaultConfig();
+    v36.configVersion = 36;
+    delete v36.gameCopyBind;
+    delete v36.clipboardWatch;
+    const config = upgradeConfig(v36);
+    expectValid(config);
+    expect(config.gameCopyBind).toBe(false);
+    expect(config.clipboardWatch).toBe(false);
+  });
+
+  it("keeps the copy triggers of its own configs", () => {
+    const config = defaultConfig();
+    config.gameCopyBind = true;
+    config.clipboardWatch = true;
+    const upgraded = upgradeConfig(config);
+    expect(upgraded.gameCopyBind).toBe(true);
+    expect(upgraded.clipboardWatch).toBe(true);
   });
 
   it("keeps the item check hotkey of an EE2 config", () => {
@@ -179,7 +203,7 @@ describe("upgradeConfig", () => {
     expect(itemCheck(upgradeConfig(config)).hotkey).toBe(null);
   });
 
-  it.each(Array.from({ length: 36 }, (_, v) => v))(
+  it.each(Array.from({ length: 37 }, (_, v) => v))(
     "runs from configVersion %i, with and without the EE2 widgets",
     (version) => {
       const ee2 = ee2Config();
@@ -218,5 +242,21 @@ describe("getConfigForHost", () => {
     expect(host.libraryOutputPath).toBe(null);
     expect(host.clientLog).toBe(null);
     expect(host.readClientLog).toBe(false);
+    expect(host.gameCopyBind).toBe(false);
+    expect(host.clipboardWatch).toBe(false);
+  });
+
+  it("passes the copy triggers", () => {
+    const config = defaultConfig();
+    config.gameCopyBind = true;
+    const host = hostConfig(config);
+    expect(host.gameCopyBind).toBe(true);
+    expect(host.clipboardWatch).toBe(false);
+
+    config.gameCopyBind = false;
+    config.clipboardWatch = true;
+    const host2 = hostConfig(config);
+    expect(host2.gameCopyBind).toBe(false);
+    expect(host2.clipboardWatch).toBe(true);
   });
 });

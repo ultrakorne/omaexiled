@@ -30,7 +30,7 @@ export interface HostConfigExt extends HostConfig {
 
 // EE2's getConfigForHost() for a default config, used until a page pushes
 // the real one and nothing is cached yet. Item check on Alt + D (DESIGN.md).
-export const DEFAULT_HOST_CONFIG: HostConfig = {
+export const DEFAULT_HOST_CONFIG: HostConfigExt = {
   shortcuts: [
     {
       shortcut: "Ctrl + D",
@@ -56,6 +56,8 @@ export const DEFAULT_HOST_CONFIG: HostConfig = {
   libraryOutputPath: null,
   initialDelay: 48,
   hideOverlayOnBlur: false,
+  gameCopyBind: false,
+  clipboardWatch: false,
 };
 
 export interface Backend {
@@ -266,12 +268,16 @@ export async function startBackend(paths: Paths, opts: { hyprland?: boolean } = 
     }
     if (event === "configreloaded") {
       // the reload dropped the Lua state with our binds and rules
-      applyHostConfig(hostConfig, true).then(() => binds.setPanel(overlay.shown != null));
+      applyHostConfig(hostConfig, true).then(() => binds.setPanel(overlay.panelVisible));
     }
     overlay.handleEvent(event, data);
   });
   hypr.onConnect(() => {
-    applyHostConfig(hostConfig, true).then(() => overlay.refresh());
+    // Re-sync the Escape gate from backend truth: a backend that died with a
+    // panel open (or a missed reload) can leave a stale `M.panel` behind.
+    applyHostConfig(hostConfig, true)
+      .then(() => binds.setPanel(overlay.panelVisible))
+      .then(() => overlay.refresh());
   });
 
   function shellState(): ShellState {
@@ -364,7 +370,7 @@ export async function startBackend(paths: Paths, opts: { hyprland?: boolean } = 
         return null;
       case "reload-binds":
         await applyHostConfig(hostConfig, true);
-        await binds.setPanel(overlay.shown != null);
+        await binds.setPanel(overlay.panelVisible);
         return binds.binds.map((b) => ({ id: b.id, shortcut: b.shortcut, combo: b.hypr.combo, mode: b.mode }));
       case "devtools": {
         const target = args[0] === "settings" ? "settings" : "overlay";
@@ -410,6 +416,7 @@ export async function startBackend(paths: Paths, opts: { hyprland?: boolean } = 
   logger.write(`info [Main] Listening on ${server.url}`);
   if (hypr.available) {
     hypr.startEvents();
+    binds.startLease();
   } else {
     logger.write("error [Hyprland] HYPRLAND_INSTANCE_SIGNATURE is not set; hotkeys are unavailable");
     await applyHostConfig(hostConfig);

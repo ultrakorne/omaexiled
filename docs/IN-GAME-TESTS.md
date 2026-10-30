@@ -89,7 +89,8 @@ Steps:
 
 Expected: the panel is drawn on top of the game in both modes, on the side
 opposite the item, never behind it, without flicker. In Windowed it stays
-inside the game window.
+inside the game window. The first price check after the switch is placed
+right too, as is the first one after moving the game to another monitor.
 
 If it fails, report: mode, the game's `fullscreen` value, whether the panel
 is missing, behind the game, offset, or on the wrong monitor; a screenshot;
@@ -158,8 +159,8 @@ Steps:
    move back out.
 
 Expected: (1) the panel closes as soon as you release `Ctrl` and move away.
-(2) the panel stays open (it was entered); it closes with `Esc`, the close
-button or a click outside.
+(2) the panel stays open (it was entered); it closes with `Esc` or the close
+button. A click outside reaches the game and the panel stays (as in test 4).
 
 If it fails, report: which case, whether it closed too early, never, or
 only after a delay.
@@ -238,8 +239,9 @@ Steps:
 2. Press `Shift+Space` again.
 3. Close the panel, then press `Shift+Space` with nothing shown.
 
-Expected: (1) the panel becomes active (dimmed background, keyboard in the
-panel). (2) back to passive. (3) the last price check reopens.
+Expected: (1) the panel becomes active (dimmed background); the keyboard
+moves to the panel once the mouse moves (as in test 8). (2) back to passive.
+(3) the last price check reopens.
 
 If it fails, report: what happened at each step, whether the game also got
 `Shift+Space`.
@@ -252,16 +254,18 @@ Steps:
    use another monitor, `Super+Tab` out, or run
    `omarchy-shell shell toggle omaexiled` from a key binding.
 2. In game, press `Shift+Space` and click the cog icon.
-3. Change the font size, close the window.
+3. Each time, change the font size and close the settings.
 
-Expected: both ways open the same settings window as a normal window you can
-type in. **Save** applies the change to the next price check and closes the
-window; **Cancel**, its X and closing it with the compositor drop unsaved
-changes. Open and close it a few times in a row: every close must work.
-Closing the window returns you to the game.
+Expected: (1) opens the settings as a normal window you can type in. (2)
+opens the same settings as a panel inside the overlay, above the game (not a
+separate window). In both, **Save** applies the change to the next price
+check and closes the settings; **Cancel** and the X (for the window also
+closing it with the compositor) drop unsaved changes. Open and close the
+window a few times in a row: every close must work. Closing the window
+returns you to the game.
 
-If it fails, report: which way failed, where the window appeared (behind the
-game, other workspace), whether you could type in it.
+If it fails, report: which way failed, where the window or panel appeared
+(behind the game, other workspace), whether you could type in it.
 
 ### 14. League switching
 
@@ -310,18 +314,24 @@ Steps:
    another monitor or with a terminal bind), wait 5 seconds, price check.
 2. Bar menu, **Quit**. In game press `Ctrl+D` and `Esc`.
 3. Bar menu, **Start OmaExiled**, wait 5 seconds, price check.
-4. `systemctl --user kill -s KILL omaexiled` (a crash); press `Ctrl+D` right
-   away and again after 5 seconds.
+4. `systemctl --user kill -s KILL omaexiled` (a crash); press `Ctrl+D` and
+   `Esc` right away and again after 5 seconds.
+5. A hung OmaExiled: `systemctl --user kill -s STOP --kill-whom=main
+   omaexiled`, wait 20 seconds, press `Ctrl+D` and `Esc` in game. Then
+   `systemctl --user kill -s CONT --kill-whom=main omaexiled`, wait 10
+   seconds, price check.
 
 Expected: (1) and (3) price checks work again. (2) while OmaExiled is
-stopped, `Ctrl+D` and `Esc` behave like plain keys in the game. (4) the
-service restarts by itself within a few seconds and price checks work again.
-Until it is back, `Ctrl+D` and the other hotkeys are swallowed while the game
-is focused (a killed backend cannot switch its binds off; a clean stop or
-Quit does).
+stopped, `Ctrl+D` and `Esc` behave like plain keys in the game. (4) right
+after the kill `Ctrl+D` and `Esc` are plain keys (the service switches the
+hotkeys off when the backend dies, `omaexiled logs` shows "Hotkeys switched
+off in Hyprland"); the service restarts by itself within a few seconds and
+price checks work again. (5) for up to 15 seconds after the STOP the hotkeys
+do nothing; after 20 seconds they are plain keys again (the game gets
+`Ctrl+D`, `Esc` opens its menu). After CONT price checks work again.
 
 If it fails, report: the step, whether keys were swallowed while OmaExiled
-was down, `omaexiled status`.
+was down (and for how long), `omaexiled status`, the log.
 
 ### 18. Other workspaces and monitors stay untouched
 
@@ -370,6 +380,46 @@ keep it off.
 If it fails, report: the exact name of the option, whether the panel got
 mouse input with it on, whether anything broke with it off.
 
+### 21. Price check on the game's own copy key
+
+Steps:
+1. In Settings, Price check, turn on **Also open on the game's own
+   Ctrl+Alt+C** and save.
+2. Hover an item and press `Ctrl+Alt+C` yourself. Then paste (`Ctrl+V`) into a
+   text editor outside the game.
+3. Back in game, press `Ctrl+Alt+C` on a second item, then `Ctrl+D` on a third.
+4. Turn the option off again, save, and press `Ctrl+Alt+C` on an item.
+
+Expected: (2) a locked price check opens for the item (dimmed background,
+like `Ctrl+Alt+D`) and the pasted text is the item with its advanced mod
+descriptions: the game got the key and copied as usual. (3) each key opens
+one panel for its own item. (4) the game copies, no panel opens.
+
+If it fails, report: whether the panel opened, whether the game still copied
+(the pasted text), the log lines around the key press (look for `game-copy`,
+`ClipboardPoller`).
+
+### 22. Clipboard watch
+
+Steps:
+1. In Settings, Price check, turn on **Open on any copied item (clipboard
+   watch)** and save.
+2. Hover an item and press `Ctrl+Alt+C`. Close the panel, then press `Ctrl+C`
+   on another item.
+3. Press `Ctrl+D` on an item.
+4. Switch to another window (`Super+Tab`), copy any text there, switch back
+   to the game.
+5. Turn the option off again, save, and press `Ctrl+Alt+C` on an item.
+
+Expected: (2) each copy opens a locked price check for that item; the one
+copied with plain `Ctrl+C` shows fewer mod details (expected, the setting's
+hint says so). (3) exactly one panel, as without the watch. (4) nothing
+happens while the other window is focused, nor when you switch back. (5) the
+game copies, no panel opens.
+
+If it fails, report: which step, whether a panel opened twice or for the
+wrong item, the log lines around the copy (look for `ClipboardWatch`).
+
 ---
 
 ## Results
@@ -396,6 +446,8 @@ mouse input with it on, whether anything broke with it off.
 | 18 | Other workspaces | | | |
 | 19 | Performance | | | |
 | 20 | Pointer confinement | | | |
+| 21 | Game copy key | | | |
+| 22 | Clipboard watch | | | |
 
 Also note: GPU and driver, monitor setup (resolution, scale, refresh), the
 display mode you settled on, and the output of `omaexiled status`.

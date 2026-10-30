@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { HostClipboard, LANGUAGE_DETECTOR, isPoeItem, type ClipboardIO } from "../src/clipboard";
+import { HostClipboard, LANGUAGE_DETECTOR, isPoeItem, readCommand, type ClipboardIO } from "../src/clipboard";
 import { Logger } from "../src/logger";
 
 function logger() {
@@ -127,6 +127,32 @@ describe("HostClipboard.readItemText", () => {
     expect(cb.isPolling).toBe(false);
   });
 
+  test("a failed read does not leave the poll stuck", async () => {
+    const { io, state } = fakeClipboard("");
+    let fail = 2;
+    const read = io.read;
+    io.read = async () => {
+      // after the initial read: wl-paste could not be spawned (EMFILE)
+      if (state.writes.length > 0 && fail-- > 0) throw new Error("EMFILE");
+      return read();
+    };
+    const cb = new HostClipboard(logger().l, io);
+    cb.updateDelay(5);
+    const text = await cb.readItemText(async () => {
+      setTimeout(() => (state.text = ITEM), 60);
+    });
+    expect(text).toBe(ITEM);
+    expect(cb.isPolling).toBe(false);
+    // and when every poll read fails, it still times out
+    const writes = state.writes.length;
+    io.read = async () => {
+      if (state.writes.length > writes) throw new Error("EMFILE");
+      return read();
+    };
+    await expect(cb.readItemText(async () => {})).rejects.toThrow("Reading clipboard timed out");
+    expect(cb.isPolling).toBe(false);
+  });
+
   test("a second press while polling shares the poll and presses again", async () => {
     const { io, state } = fakeClipboard("");
     const cb = new HostClipboard(logger().l, io);
@@ -181,6 +207,21 @@ describe("HostClipboard.restoreShortly", () => {
     expect(state.writes).toEqual(["/hideout", "/exit", "mine"]);
   });
 
+  test("restores the user's clipboard when sending the keys fails", async () => {
+    const { io, state } = fakeClipboard("mine");
+    const cb = new HostClipboard(logger().l, io);
+    cb.updateOptions(true);
+    await expect(
+      cb.restoreShortly(async (write) => {
+        await write("/hideout");
+        throw new Error("send_shortcut: window not found");
+      }),
+    ).rejects.toThrow("window not found");
+    expect(state.text).toBe("/hideout");
+    await Bun.sleep(320);
+    expect(state.text).toBe("mine");
+  });
+
   test("no restore by default", async () => {
     const { io, state } = fakeClipboard("mine");
     const cb = new HostClipboard(logger().l, io);
@@ -204,5 +245,18 @@ describe("HostClipboard.waitForGameCopy", () => {
     const cb = new HostClipboard(logger().l, io);
     cb.updateDelay(5);
     expect(await cb.waitForGameCopy()).toBe(ITEM);
+  });
+});
+
+describe("readCommand (wl-paste)", () => {
+  test("stdout of a successful command", async () => {
+    expect(await readCommand(["printf", "abc"])).toBe("abc");
+    expect(await readCommand(["false"])).toBe("");
+  });
+
+  test("a command that never finishes is cut off", async () => {
+    const t0 = Date.now();
+    expect(await readCommand(["sleep", "5"], 100)).toBe("");
+    expect(Date.now() - t0).toBeLessThan(1000);
   });
 });

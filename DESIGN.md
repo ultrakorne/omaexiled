@@ -78,7 +78,9 @@ live inside omarchy-shell.
 ```
 
 - `omaexiled.service` (systemd user unit, `PartOf=graphical-session.target`,
-  `Restart=on-failure` so "Quit" stays quit) runs `bin/omaexiled run`.
+  `Restart=on-failure` so "Quit" stays quit) runs `bin/omaexiled run`. Its
+  `ExecStopPost` runs `bin/omaexiled disable-binds` after every exit, so the
+  binds of a killed backend pass keys through at once (see "Hotkeys").
 - The backend starts the host when PoE2's window appears (the overlay page is
   preloaded so the first price check is instant) or when a window is
   requested, stops it 10 minutes after PoE2 closes and no window is open, and
@@ -128,6 +130,11 @@ when empty), event names and payloads from `ipc/types.ts`. Changes:
     window (captcha / login on pathofexile.com).
   - `MAIN->CLIENT::updater-state` is answered with
     `{state: "update-not-available", checkedAt}`; there is no updater.
+- **`HostConfig`** (`CLIENT->MAIN::update-host-config`) gains two optional
+  booleans, `gameCopyBind` and `clipboardWatch` (the extra price-check
+  triggers, see "Hotkeys"); absent means off. The renderer keeps them as
+  global config keys of the same names and passes them through
+  `getConfigForHost()`.
 - **Dropped:** `widget-action`, `ocr-text`, `game-log`, `write-data`,
   `re-parse-log`, `visibility`, `overlay-attached`, `/uploads`.
 
@@ -159,6 +166,7 @@ Backend → host:
 | type | fields | effect |
 |---|---|---|
 | `overlay.show` | `output` (monitor name), `rect {x,y,width,height}` (game window, monitor-local logical px) | map the overlay surface on that output with margins so it covers `rect`; no-op if already mapped there |
+| `overlay.prepare` | `output`, `rect` (as `overlay.show`) | remember the game geometry; if the overlay is not mapped, warm the page up there (below) so its viewport is the game window; if mapped, only remember it. Sent on host connect and whenever the PoE2 window's output or rect changes while the overlay is hidden |
 | `overlay.hide` | | unmap (QWindow::hide destroys the layer surface) |
 | `overlay.input` | `rects[]`, `full` | `setMask()` to the union of `rects`, or the whole surface when `full`; then `update()` to commit |
 | `settings.open` | | show / raise the settings window (`/?mode=settings`) |
@@ -184,6 +192,16 @@ the keyboard from the game), `setActivateOnShow(false)`,
 no context menu, `newWindowRequested` / `window.open` → `xdg-open` via
 `QDesktopServices`, transparent background.
 
+Warm-up: Chromium gives a page its viewport size only once it is exposed,
+and the renderer reads it when `item-text` arrives, before the surface is
+shown. So after the overlay page loads, and on an `overlay.prepare` that
+differs from the page's current layout, the host maps the hidden page once at
+the last game geometry (`overlay.prepare` / `overlay.show`; the primary
+screen before any) with no input region and keyboard `none`, and unmaps it
+after the second frame. A warm-up is not reported in `overlay.state` and
+never replaces a shown surface; an `overlay.show` takes a warm-up surface
+over.
+
 ### Backend ↔ bar widget (`shell.sock`, NDJSON)
 
 As specified and verified in `docs/port-notes/09-omarchy-shell-plugin.md` §8:
@@ -201,8 +219,11 @@ The host owns one overlay layer surface on the monitor that shows PoE2:
   monitor for fullscreen PoE2). A runtime `no_anim` layer rule for
   `^omaexiled$` removes Omarchy's fade-in;
 - mapped only while the overlay page wants to show something
-  (`render-state {shouldShow}`), destroyed otherwise, so the game keeps direct
-  scanout when idle;
+  (`render-state {shouldShow}`) and PoE2 is focused (with no game, as in
+  `ctl` tests, it covers a monitor), destroyed otherwise
+  (apart from the two-frame warm-ups), so the game keeps direct scanout when
+  idle. After PoE2 closes it stays unmapped, whatever the page reports, until
+  the next price check or overlay key;
 - the **input region** is what the page reports (`input-region`): the visible
   widgets' rectangles (price panel, related-items column, open tooltips /
   popovers) while inactive, the whole surface while active;
@@ -228,13 +249,27 @@ check-position circle.
 
 The backend owns the state: it sends `focus-change {game, overlay}` exactly
 like EE2's main process (`overlay` = active) and the renderer keeps the
-`wasActive` guard from the user's `omarchy_new` branch.
+`wasActive` guard from the user's `omarchy_new` branch. Because that guard
+keeps an inactive panel, the backend also sends `hide-exclusive-widget` when
+PoE2 loses focus or closes, in both modes (EE2 hid hide-on-blur widgets on
+every blur).
+
+Settings: the bar opens the settings window. In the active overlay the cog
+and the price panel's league title open EE2's settings widget inside the
+overlay. During a quick (inactive) check, where that widget would stay
+invisible, the league title sends `CLIENT->MAIN::open-settings` instead.
 
 Hold mode (quick check, `focusOverlay: false`) reproduces
-`WidgetAreaTracker`: the backend polls `j/cursorpos` every 50 ms after
+`WidgetAreaTracker`: the backend polls the cursor and the modifier keys
+(`/repl` with `hl.get_cursor_pos` and `hl.is_key_down`) every 50 ms after
 `track-area`; the panel closes (`hide-exclusive-widget`) when the cursor never
 entered the panel area, the hold key is released and the cursor is more than
 `closeThreshold` from the press point. Entering the panel area stops tracking.
+The renderer computes the area and the panel side from the reactive surface
+size and sends `track-area` again if that size changes while a hold-mode
+check is shown. A failed key-state request skips that poll; only three
+unusable replies in a row (a Hyprland without `hl.is_key_down`) make the
+rest of that tracking session treat the hold key as released.
 
 ## Verified platform behavior
 
@@ -256,7 +291,8 @@ Measured on this machine (Hyprland 0.56.2, Lua config, NVIDIA) with
 Hyprland Lua API names in use: `hl.bind`, `hl.unbind`, `hl.dispatch`,
 `hl.dsp.send_key_state`, `hl.dsp.send_shortcut`, `hl.dsp.cursor.move`,
 `hl.timer`, `hl.get_active_window`, `hl.get_cursor_pos`, `hl.is_key_down`,
-`hl.layer_rule`, `hl.window_rule`, `hl.on`. `hyprctl dispatch` takes Lua
+`hl.layer_rule`, `hl.window_rule`, `hl.on`, plus Lua's `os.time()` (the
+binds lease). `hyprctl dispatch` takes Lua
 dispatcher expressions, not the old `dispatcher args` strings. Send keys as a
 `down` then, after a short `hl.timer`, an `up` (Omarchy's
 `bindings/clipboard.lua` does the same to avoid stuck synthetic keys).
@@ -278,12 +314,24 @@ backend writes `$XDG_RUNTIME_DIR/omaexiled/binds.lua` and runs
   later only `set_enabled(true/false)` (never `hl.unbind` / `remove`, which
   would also delete the user's binds on that combo);
 - the callback returns `{ ok = false }` (key passes through to the focused
-  window) unless the backend is alive (`_G.omaexiled.enabled`), the active
-  window is PoE2 and the combo maps to an action; then it calls
+  window) unless the backend is alive (`M.enabled and (M.lease or 0) >=
+  os.time()`, with `M = _G.omaexiled`), the active window is PoE2 and the
+  combo maps to an action; then it calls
   `hl.dispatch(hl.dsp.event("omaexiled:<actionId>"))` and the key is consumed;
+- the lease: the backend sets `_G.omaexiled.lease = os.time() + 15` through
+  `/eval` right after every install and every 5 s while it runs, so a killed
+  or hung backend stops taking PoE2's keys within 15 s;
 - `Escape` is bound the same way but only acts while a panel is visible
-  (`_G.omaexiled.panel`, set by the backend);
-- `_G.omaexiled.enabled = false` on backend shutdown.
+  (`_G.omaexiled.panel`, set by the backend: the surface is shown and the
+  overlay is active or the page's input region is not empty; a surface
+  mapped only for the debug key log or the editing banner does not count).
+  The backend sets it again after every forced install (on connecting to
+  Hyprland, on a config reload, on `ctl reload-binds`) and clears it when the
+  host disconnects;
+- on backend shutdown `enabled` and `panel` become false and the lease is
+  cleared. After any exit the unit's `ExecStopPost` (`omaexiled
+  disable-binds`) does the same through `hyprctl eval`
+  (`M.enabled=false M.lease=0 M.panel=false`).
 
 The backend receives `custom>>omaexiled:<actionId>` on socket2 and maps the
 id to the `HostConfig.shortcuts` entry. PoE2 is the window whose class is
@@ -303,9 +351,10 @@ Copy chord = `Ctrl+C` merged with PoE2's "show advanced item descriptions"
 key from its ini (default Alt), i.e. `Ctrl+Alt+C`. Keys are sent from the
 backend over the request socket (a full press/release per step, ~30 ms
 apart), never from inside a bind callback. Clipboard restore waits 300 ms.
-Two more trigger modes are settings: a pass-through bind on the game's own
-copy chord, and a passive clipboard watch (`wl-paste --watch`, only while
-PoE2 is focused).
+Two more trigger modes are settings (Settings, Price check; both off by
+default), sent as the optional `HostConfig` booleans: `gameCopyBind`, a
+pass-through bind on the game's own copy chord, and `clipboardWatch`, a
+passive clipboard watch (`wl-paste --watch`, only while PoE2 is focused).
 
 Known conflicts on this machine: Omarchy binds `F9` (dictation) and the
 user's config binds `Ctrl+Alt+D` (old prototype script). Both would fire
@@ -322,7 +371,7 @@ already has a non-OmaExiled bind.
 | `backend/` | Bun backend (`src/`, `test/`) |
 | `host/` | Qt 6 host (`omaexiled-host.pro`, `src/`, `qml/`) |
 | `omarchy-plugin/` | bar widget, copied to `~/.config/omarchy/plugins/omaexiled/` |
-| `bin/omaexiled` | entry point: `run`, `ctl`, `install`, `uninstall`, `status` |
+| `bin/omaexiled` | entry point: `run`, `ctl`, `status`, `logs`, `install`, `uninstall`, `update-plugin`, `disable-binds` |
 | `packaging/` | systemd user unit |
 | `tools/fake-poe/` | fake PoE2 XWayland window for tests |
 | `docs/port-notes/` | EE2 subsystem notes (the porting reference) |

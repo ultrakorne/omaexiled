@@ -14,6 +14,10 @@ After=graphical-session.target
 [Service]
 Type=simple
 ExecStart=@REPO@/bin/omaexiled run
+# After every exit, clean or not (also before an automatic restart): a killed
+# backend cannot switch its Hyprland binds off itself. Never fails; "-" also
+# covers logout, when Hyprland is already gone.
+ExecStopPost=-@REPO@/bin/omaexiled disable-binds
 # "Quit" in the bar menu exits with status 0, which on-failure leaves stopped.
 Restart=on-failure
 RestartSec=2

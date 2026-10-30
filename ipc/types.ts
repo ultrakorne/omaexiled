@@ -13,6 +13,12 @@ export interface HostConfig {
   libraryOutputPath: string | null;
   initialDelay: number;
   hideOverlayOnBlur: boolean;
+  // OmaExiled: two more ways to trigger a price check (absent = off).
+  // Also price-check on the game's own copy chord (the key still reaches
+  // the game).
+  gameCopyBind?: boolean;
+  // Price-check every item copied while PoE2 is focused (wl-paste --watch).
+  clipboardWatch?: boolean;
 }
 
 export interface ShortcutAction {

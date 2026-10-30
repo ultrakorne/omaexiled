@@ -34,6 +34,8 @@ Commands:
                   ~/.local/bin/omaexiled, then enable and start the service
   uninstall       Undo install; your settings in $config_dir are kept
   update-plugin   Copy the bar widget to $plugin_dest again
+  disable-binds   Let the hotkeys reach the game again right away (the
+                  service runs this after every stop)
   help            Show this help
 USAGE
 }
@@ -92,16 +94,40 @@ cmd_ctl() {
   exec "$bun" "$main" ctl "$@"
 }
 
+# Turns OmaExiled's Hyprland binds off, like Binds.disable() in
+# backend/src/binds.ts, for when the backend could not do it itself (killed,
+# crashed, hung). Every bound key reaches the focused window again. Never
+# fails: at logout Hyprland is already gone.
+cmd_disable_binds() {
+  if ! command -v hyprctl >/dev/null 2>&1; then
+    warn "hyprctl not found; hotkeys not switched off"
+    return 0
+  fi
+  local lua='local M=rawget(_G,"omaexiled") if M then M.enabled=false M.lease=0 M.panel=false end'
+  local reply
+  reply=$(timeout 5 hyprctl eval "$lua" 2>&1) || true
+  if [[ $reply == ok* ]]; then
+    say "Hotkeys switched off in Hyprland"
+  else
+    warn "could not switch the hotkeys off in Hyprland: ${reply:-no reply}"
+  fi
+  return 0
+}
+
 # --- install ----------------------------------------------------------------
 
-install_unit() {
-  # Written into ExecStart= unquoted: whitespace, quotes, backslashes and
-  # systemd's % specifiers would all change its meaning.
+# The checkout path goes into the unit's ExecStart= unquoted, where
+# whitespace, quotes, backslashes and systemd's % specifiers would change its
+# meaning, and make cannot build in a path with spaces at all. Checked before
+# the build so this message comes first, not make's errors.
+check_repo_path() {
   local unsafe='[[:space:]"'"'"'\\%]'
   if [[ $repo =~ $unsafe ]]; then
-    die "the checkout path must not contain spaces, quotes, backslashes or %: $repo"
+    die "the checkout path must not contain spaces, quotes, backslashes or % (the build and the systemd unit cannot handle them); move the checkout: $repo"
   fi
+}
 
+install_unit() {
   local rendered
   rendered=$(<"$repo/packaging/$unit_name")
   rendered=${rendered//@REPO@/"$repo"}
@@ -199,6 +225,7 @@ enable_service() {
 }
 
 cmd_install() {
+  check_repo_path
   command -v jq >/dev/null 2>&1 || die "jq not found (sudo pacman -S jq)"
 
   step "Building"
@@ -238,6 +265,8 @@ cmd_uninstall() {
     systemctl --user daemon-reload
     systemctl --user reset-failed "$unit_name" 2>/dev/null || true
   fi
+  # The unit's ExecStopPost already did this if the service was running.
+  cmd_disable_binds
   if [[ -d $runtime_dir ]]; then
     rm -rf "$runtime_dir"
     say "Removed $runtime_dir"
@@ -336,6 +365,7 @@ case $cmd in
   status) cmd_status ;;
   logs) cmd_logs "$@" ;;
   update-plugin) cmd_update_plugin ;;
+  disable-binds) cmd_disable_binds ;;
   help | -h | --help) usage ;;
   "")
     usage >&2

@@ -155,10 +155,13 @@ export interface Config {
   alphas: Array<"library">;
   tipsFrequency: TipsFrequency;
   readClientLog: boolean; // default to false, opt-in only
+  // OmaExiled: more price check triggers, see HostConfig
+  gameCopyBind: boolean;
+  clipboardWatch: boolean;
 }
 
 export const defaultConfig = (): Config => ({
-  configVersion: 36,
+  configVersion: 37,
   overlayKey: "Shift + Space",
   overlayBackground: "rgba(129, 139, 149, 0.15)",
   overlayBackgroundClose: true,
@@ -231,6 +234,8 @@ export const defaultConfig = (): Config => ({
   alphas: [],
   tipsFrequency: TipsFrequency.Normal,
   readClientLog: false, // default to false, opt-in only
+  gameCopyBind: false,
+  clipboardWatch: false,
 });
 
 // Defaults of the EE2 widgets that are not ported, as EE2 defines them. Only
@@ -815,6 +820,15 @@ function upgradeConfig(_config: Config): Config {
 
     config.configVersion = 36;
   }
+
+  if (config.configVersion < 37) {
+    // NOTE: OmaExiled, price check on the game's copy chord or on any
+    // copied item (both off)
+    config.gameCopyBind = false;
+    config.clipboardWatch = false;
+
+    config.configVersion = 37;
+  }
   /* eslint-enable */
 
   return config as unknown as Config;
@@ -952,6 +966,8 @@ function getConfigForHost(): HostConfig {
     libraryOutputPath: null,
     initialDelay: priceCheck.initialDelay,
     hideOverlayOnBlur: config.hideOverlayOnBlur,
+    gameCopyBind: config.gameCopyBind,
+    clipboardWatch: config.clipboardWatch,
   };
 }
 

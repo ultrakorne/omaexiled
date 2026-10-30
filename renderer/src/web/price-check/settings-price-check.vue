@@ -163,6 +163,16 @@
       t(":always_show_tier")
     }}</ui-checkbox>
 
+    <div class="mb-4">
+      <ui-checkbox class="mb-1" v-model="gameCopyBind">{{
+        t(":game_copy_bind")
+      }}</ui-checkbox>
+      <ui-checkbox class="mb-1" v-model="clipboardWatch">{{
+        t(":clipboard_watch")
+      }}</ui-checkbox>
+      <div class="italic text-gray-500">{{ t(":copy_triggers_hint") }}</div>
+    </div>
+
     <div class="border-2 rounded border-gray-700 mb-2">
       <div class="bg-gray-700 p-2 mb-2">{{ t(":warn_expensive") }}</div>
       <ui-checkbox
@@ -275,6 +285,8 @@ export default defineComponent({
         },
       }),
       accountName: configModelValue(() => props.config, "accountName"),
+      gameCopyBind: configModelValue(() => props.config, "gameCopyBind"),
+      clipboardWatch: configModelValue(() => props.config, "clipboardWatch"),
       showSeller: configModelValue(() => configWidget.value, "showSeller"),
       activateStockFilter: configModelValue(
         () => configWidget.value,

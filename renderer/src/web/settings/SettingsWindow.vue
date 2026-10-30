@@ -138,6 +138,7 @@ import SettingsItemcheck from "../item-check/settings-item-check.vue";
 import SettingsHelp from "./help.vue";
 import SettingsDebug from "./debug.vue";
 import SettingsStashSearch from "../stash-search/stash-search-editor.vue";
+import { mergeConfigEdits } from "./utils";
 
 function shuffle<T>(array: T[]): T[] {
   let currentIndex = array.length;
@@ -322,7 +323,18 @@ export default defineComponent({
     return {
       t,
       save() {
-        updateConfig(configClone.value!);
+        if (props.standalone) {
+          // OmaExiled: keep what the overlay saved since the clone
+          updateConfig(
+            mergeConfigEdits(
+              JSON.parse(clonedFrom),
+              configClone.value!,
+              AppConfig(),
+            ),
+          );
+        } else {
+          updateConfig(configClone.value!);
+        }
         // OmaExiled: close first and save now. EE2 saved while this
         // exclusive widget was still shown, so saveConfig did nothing until
         // a later blur, which a never-focused overlay may not get.

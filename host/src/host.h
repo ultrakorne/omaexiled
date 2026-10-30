@@ -63,7 +63,8 @@ private:
   QQmlEngine *m_engine = nullptr;
   QQuickWindow *m_overlayWindow = nullptr;
   Overlay *m_overlay = nullptr;
-  bool m_pageLoaded = false;
+  bool m_pageLoaded = false;    // any page
+  bool m_overlayLoaded = false; // the overlay page, at least once
   QPointer<QQuickWindow> m_settings;
   QPointer<QQuickWindow> m_browser;
   QHash<QString, QPointer<QQuickWindow>> m_devtools;

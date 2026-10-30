@@ -247,4 +247,15 @@ describe("HTTP", () => {
       (await fetch(`${base}/proxy/poe.ninja/x`, { headers: { Origin: base, "Sec-Fetch-Site": "same-origin" } })).status,
     ).toBe(200);
   });
+
+  test("proxy requests are exempt from Bun's 10 s idle timeout", async () => {
+    const timeouts: number[] = [];
+    const fake = { timeout: (_req: Request, seconds: number) => timeouts.push(seconds) } as any;
+    const host = `127.0.0.1:${server.port}`;
+    const res = await server.fetch(new Request(`${base}/proxy/poe.ninja/x`, { headers: { host } }), fake);
+    expect(res!.status).toBe(200);
+    expect(timeouts).toEqual([0]);
+    await server.fetch(new Request(`${base}/config`, { headers: { host } }), fake);
+    expect(timeouts).toEqual([0]);
+  });
 });

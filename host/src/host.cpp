@@ -63,8 +63,12 @@ bool Host::start() {
 
   connect(&m_link, &BackendLink::connected, this, &Host::onConnected);
   connect(&m_link, &BackendLink::message, this, &Host::onMessage);
-  connect(&m_link, &BackendLink::closed, this,
-          [](bool connected) { QCoreApplication::exit(connected ? 0 : 1); });
+  // Queued: a first attempt that fails outright reports it from inside
+  // connectToBackend() below, before main() enters the event loop, where
+  // exit() would do nothing.
+  connect(
+      &m_link, &BackendLink::closed, this,
+      [](bool connected) { QCoreApplication::exit(connected ? 0 : 1); }, Qt::QueuedConnection);
   m_link.connectToBackend();
   return true;
 }
@@ -79,15 +83,26 @@ void Host::onConnected() {
   if (m_pageLoaded) m_cookies->start();
 }
 
+// overlay.show / overlay.prepare: the game window, monitor-local logical px.
+static QRect gameRect(const QJsonObject &message) {
+  const QJsonObject r = message.value("rect").toObject();
+  return QRectF(r.value("x").toDouble(), r.value("y").toDouble(), r.value("width").toDouble(),
+                r.value("height").toDouble())
+      .toRect();
+}
+
 void Host::onMessage(const QJsonObject &message) {
   const QString type = message.value("type").toString();
 
   if (type == u"overlay.show") {
-    const QJsonObject r = message.value("rect").toObject();
-    const QRect rect = QRectF(r.value("x").toDouble(), r.value("y").toDouble(),
-                              r.value("width").toDouble(), r.value("height").toDouble())
-                           .toRect();
-    m_overlay->show(message.value("output").toString(), rect);
+    m_overlay->show(message.value("output").toString(), gameRect(message));
+  } else if (type == u"overlay.prepare") {
+    // Lay the hidden page out at the game window now, so the next item-text
+    // reads the right size. Before the page has loaded, its warm-up
+    // (pageLoaded) uses this geometry.
+    if (m_overlay->prepare(message.value("output").toString(), gameRect(message)) &&
+        m_overlayLoaded)
+      m_overlay->warmUp();
   } else if (type == u"overlay.hide") {
     m_overlay->hide();
   } else if (type == u"overlay.input") {
@@ -250,7 +265,10 @@ void Host::log(const QString &level, const QString &message) {
 void Host::pageLoaded(const QString &page, qint64 rendererPid) {
   log(QStringLiteral("info"),
       QStringLiteral("%1 page loaded (renderer pid %2)").arg(page).arg(rendererPid));
-  if (page == u"overlay" && !m_overlay->isMapped()) m_overlay->warmUp();
+  if (page == u"overlay") {
+    m_overlayLoaded = true;
+    if (!m_overlay->isMapped()) m_overlay->warmUp();
+  }
   m_pageLoaded = true;
   if (m_link.isConnected()) m_cookies->start();
 }

@@ -4,6 +4,7 @@
 //                                 [--spawn <omaexiled-host>] [--panel x,y,w,h]
 //                                 [--renderer <renderer/dist>]
 //                                 [--auto-overlay <output>:<width>x<height>]
+//                                 [--prepare <output>:<width>x<height>]
 //
 // - listens on <socket> like the backend's host.sock and records every NDJSON
 //   message the host sends;
@@ -27,6 +28,8 @@
 //   --auto-overlay plays the backend's part for the overlay: render-state
 //   shouldShow -> overlay.show / overlay.hide (whole output), input-region ->
 //   overlay.input.
+// - with --prepare (implied by --auto-overlay), sends overlay.prepare for the
+//   whole output when the host connects, like the backend does.
 
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
@@ -45,6 +48,7 @@ const socketPath = opt(
 const spawnHost = opt("spawn");
 const rendererDir = opt("renderer");
 const autoOverlay = opt("auto-overlay")?.match(/^(.+):(\d+)x(\d+)$/);
+const prepareOn = (opt("prepare") ?? opt("auto-overlay"))?.match(/^(.+):(\d+)x(\d+)$/);
 const wsClients = new Set<any>();
 let wsReceived: any[] = [];
 const [px, py, pw, ph] = opt("panel", "200,150,420,300")!.split(",").map(Number);
@@ -77,6 +81,10 @@ Bun.listen({
       hostSocket = socket;
       buffer = "";
       log("host connected");
+      if (prepareOn) {
+        const [, output, w, h] = prepareOn;
+        send({ type: "overlay.prepare", output, rect: { x: 0, y: 0, width: Number(w), height: Number(h) } });
+      }
     },
     data(_socket, data) {
       buffer += data.toString();

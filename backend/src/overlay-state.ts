@@ -39,6 +39,9 @@ export interface SurfaceGeometry {
 // ask again before treating the game as unfocused.
 const BLUR_DEBOUNCE = 120;
 const TRACK_INTERVAL = 50;
+// Unusable key-state replies in a row before a tracking session falls back
+// to "key released" (a Hyprland without hl.is_key_down).
+const KEY_QUERY_ATTEMPTS = 3;
 
 export class OverlayState {
   gameFocused = false;
@@ -52,6 +55,15 @@ export class OverlayState {
   private monitors: HyprMonitor[] = [];
   private activeAddress = "";
   shown: SurfaceGeometry | null = null;
+  // Geometry the host last got (overlay.show / overlay.prepare): the hidden
+  // overlay page keeps the game window's viewport.
+  private hostGeometry: { output: string; rect: Rect } | null = null;
+  // PoE2 closed or crashed: the surface stays unmapped until something asks
+  // for it again (a price check, the overlay key), even if the page still
+  // reports shouldShow.
+  private gameGone = false;
+  // Last value sent to the binds (`_G.omaexiled.panel`).
+  private panelSent = false;
   hostMapped = false;
   hostKeyboardFocus = false;
   private inputRegion: { rects: InputRect[]; full: boolean } = { rects: [], full: false };
@@ -110,12 +122,24 @@ export class OverlayState {
     }
     if (hadGame !== (game != null)) {
       this.deps.logger.write(game ? `info [Overlay] Path of Exile 2 detected (${game.address})` : "info [Overlay] Path of Exile 2 closed");
+      this.gameGone = !game;
+      if (!game) {
+        // EE2 hid the overlay window when the game window went away. The
+        // renderer drops the panel (it must not come back over the next
+        // game) and the surface is unmapped now, whatever the page reports.
+        this.tracker.stop();
+        this.deps.broadcast({ name: "MAIN->OVERLAY::hide-exclusive-widget", payload: undefined });
+        if (this.overlayActive) this.assertGameActive();
+        else this.sync();
+      }
       this.deps.onGamePresence(game != null);
     }
     this.activeAddress = active?.address ?? "";
     this.applyFocus(this.computeFocused(active));
-    // geometry may have changed under a visible overlay
+    // geometry may have changed under a visible overlay; a hidden one keeps
+    // the host's page sized like the game window
     if (this.shown) this.sync();
+    else this.prepare();
     this.deps.onChange();
   }
 
@@ -187,7 +211,15 @@ export class OverlayState {
     // active mode. The port also ends it when the game loses focus: the
     // overlay is hidden then, it must not come back active.
     if (this.overlayActive) this.overlayActive = false;
-    if (!focused) this.tracker.stop();
+    if (!focused) {
+      this.tracker.stop();
+      // EE2 hid hide-on-blur widgets on every blur; the renderer's wasActive
+      // guard keeps a quick (inactive) panel, so close it here. Otherwise it
+      // would come back over the game on return, without hold-mode tracking.
+      if (this.shouldShow) {
+        this.deps.broadcast({ name: "MAIN->OVERLAY::hide-exclusive-widget", payload: undefined });
+      }
+    }
     this.emitFocusChange();
     this.sync();
     this.deps.onChange();
@@ -217,6 +249,7 @@ export class OverlayState {
   // --- EE2 OverlayWindow -------------------------------------------------
 
   assertOverlayActive = () => {
+    this.gameGone = false;
     if (!this.overlayActive) {
       this.overlayActive = true;
       this.emitFocusChange(true);
@@ -266,6 +299,7 @@ export class OverlayState {
   }
 
   sendItemText(payload: ItemText) {
+    this.gameGone = false;
     if (payload.target === "price-check") this.lastPriceCheck = payload;
     this.deps.sendItemText(payload);
   }
@@ -281,6 +315,7 @@ export class OverlayState {
   onInputRegion(region: { rects: InputRect[]; full: boolean }) {
     this.inputRegion = { rects: region.rects ?? [], full: Boolean(region.full) };
     if (this.shown) this.deps.host.send({ type: "overlay.input", ...this.inputRegion });
+    this.updatePanel();
   }
 
   onTrackArea(opts: TrackArea) {
@@ -292,9 +327,11 @@ export class OverlayState {
     this.hostKeyboardFocus = keyboardFocus;
   }
 
-  // Host (re)connected: it has no surface yet.
+  // Host (re)connected or gone: it has no surface and no geometry yet.
   onHostConnected() {
     this.shown = null;
+    this.hostGeometry = null;
+    this.updatePanel();
     this.sync();
   }
 
@@ -382,10 +419,12 @@ export class OverlayState {
   }
 
   private async doSync() {
+    // Without a game (ctl, browser use) the surface covers a monitor, but
+    // not after PoE2 closed under a visible panel.
     const want =
       this.deps.host.connected &&
       (this.shouldShow || this.overlayActive) &&
-      (this.game ? this.gameFocused : true);
+      (this.game ? this.gameFocused : !this.gameGone);
     const wasShown = this.shown != null;
     if (want) {
       const geo = await this.geometry(!this.shown);
@@ -393,6 +432,7 @@ export class OverlayState {
         if (!this.shown || geo.output !== this.shown.output || !sameRect(geo.rect, this.shown.rect)) {
           this.deps.host.send({ type: "overlay.show", output: geo.output, rect: geo.rect });
           this.deps.host.send({ type: "overlay.input", ...this.inputRegion });
+          this.hostGeometry = { output: geo.output, rect: geo.rect };
         }
         this.shown = geo;
       }
@@ -400,10 +440,40 @@ export class OverlayState {
       this.deps.host.send({ type: "overlay.hide" });
       this.shown = null;
     }
+    if (!this.shown) this.prepare();
+    this.updatePanel();
     if (wasShown !== (this.shown != null)) {
-      this.deps.setPanel(this.shown != null);
       this.deps.onChange();
     }
+  }
+
+  // overlay.prepare: while hidden, the host warm-up maps the page on the
+  // game's output with the game window's size, so the next show renders
+  // with the right viewport. Sent on host connect and when the game window
+  // moves (without a game only on connect: the monitor is a fallback).
+  private prepare() {
+    if (this.shown || !this.deps.host.connected) return;
+    const last = this.hostGeometry;
+    if (!this.game && last) return;
+    const geo = this.computeGeometry();
+    if (!geo) return;
+    if (last && last.output === geo.output && sameRect(last.rect, geo.rect)) return;
+    this.hostGeometry = { output: geo.output, rect: geo.rect };
+    this.deps.host.send({ type: "overlay.prepare", output: geo.output, rect: geo.rect });
+  }
+
+  // Escape closes a panel only while one is visible: an exclusive widget
+  // (the page's input region is not empty) or the active mode. A surface
+  // mapped for the debug key log or the editing banner is not a panel.
+  get panelVisible() {
+    return this.shown != null && (this.overlayActive || this.inputRegion.full || this.inputRegion.rects.length > 0);
+  }
+
+  private updatePanel() {
+    const visible = this.panelVisible;
+    if (visible === this.panelSent) return;
+    this.panelSent = visible;
+    this.deps.setPanel(visible);
   }
 
   status() {
@@ -446,7 +516,7 @@ export class AreaTracker {
   private timer?: ReturnType<typeof setInterval>;
   private opts?: TrackArea;
   private busy = false;
-  private keyQueryFailed = false;
+  private badKeyReplies = 0;
 
   constructor(
     private hypr: Hyprland,
@@ -461,6 +531,7 @@ export class AreaTracker {
     this.stop();
     if (!this.hypr.available) return;
     this.opts = opts;
+    this.badKeyReplies = 0;
     this.timer = setInterval(() => this.poll(), TRACK_INTERVAL);
   }
 
@@ -471,20 +542,22 @@ export class AreaTracker {
   }
 
   // Cursor (global logical) and modifier state in one request. Hyprland
-  // has no modifier query; hl.is_key_down takes keysym names.
-  private async sample(): Promise<{ x: number; y: number; ctrl: boolean; alt: boolean }> {
-    if (!this.keyQueryFailed) {
-      try {
-        const out = await this.hypr.repl(
-          'local p = hl.get_cursor_pos() return p.x, p.y, hl.is_key_down("Control_L") or hl.is_key_down("Control_R"), hl.is_key_down("Alt_L") or hl.is_key_down("Alt_R")',
-        );
-        const [x, y, ctrl, alt] = out.split("\t");
-        if (x !== undefined && !Number.isNaN(Number(x)) && (ctrl === "true" || ctrl === "false")) {
-          return { x: Number(x), y: Number(y), ctrl: ctrl === "true", alt: alt === "true" };
-        }
-      } catch {}
-      // Fall back to "key released" (DESIGN.md)
-      this.keyQueryFailed = true;
+  // has no modifier query; hl.is_key_down takes keysym names. A failed
+  // request (timeout while Hyprland stalls) throws: poll() skips the tick
+  // instead of treating the hold key as released.
+  private async sample(): Promise<{ x: number; y: number; ctrl: boolean; alt: boolean } | null> {
+    if (this.badKeyReplies < KEY_QUERY_ATTEMPTS) {
+      const out = await this.hypr.repl(
+        'local p = hl.get_cursor_pos() return p.x, p.y, hl.is_key_down("Control_L") or hl.is_key_down("Control_R"), hl.is_key_down("Alt_L") or hl.is_key_down("Alt_R")',
+      );
+      const [x, y, ctrl, alt] = out.split("\t");
+      if (x !== undefined && !Number.isNaN(Number(x)) && (ctrl === "true" || ctrl === "false")) {
+        this.badKeyReplies = 0;
+        return { x: Number(x), y: Number(y), ctrl: ctrl === "true", alt: alt === "true" };
+      }
+      // An error reply: the key-state API may be missing. After a few in a
+      // row, fall back to "key released" (DESIGN.md) for this session.
+      if (++this.badKeyReplies < KEY_QUERY_ATTEMPTS) return null;
     }
     const p = await this.hypr.cursorPos();
     return { x: p.x, y: p.y, ctrl: false, alt: false };
@@ -496,7 +569,7 @@ export class AreaTracker {
     try {
       const opts = this.opts;
       const s = await this.sample();
-      if (this.opts !== opts) return;
+      if (!s || this.opts !== opts) return;
       const origin = this.overlay.shown?.origin ?? this.overlay.computeGeometry()?.origin ?? { x: 0, y: 0 };
       const point = { x: s.x - origin.x, y: s.y - origin.y };
       const modifier = s.ctrl ? "Ctrl" : s.alt ? "Alt" : undefined;

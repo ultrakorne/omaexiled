@@ -34,11 +34,17 @@ public:
   // nothing) if no screen has that name.
   bool show(const QString &output, const QRect &rect);
   void hide();
+  // The game window while the overlay is hidden (overlay.prepare), kept for
+  // warm-ups. Returns true if the page is not laid out at that size yet,
+  // false if it is or if no screen has that name.
+  bool prepare(const QString &output, const QRect &rect);
   // Chromium gives a page its viewport size only once the window has been
   // exposed, and the renderer reads innerWidth when item-text arrives, while
-  // still hidden. So after the page loads, map once (click-through, keyboard
-  // none, transparent page) and unmap after the first frame. Not reported as
-  // mapped.
+  // still hidden. So after the page loads, and when the game window changes
+  // while hidden, map once at the last game geometry (overlay.prepare /
+  // overlay.show; the primary screen before any) with click-through, keyboard
+  // none and a transparent page, and unmap after the first frame. Not
+  // reported as mapped. Does nothing while the overlay is shown.
   void warmUp();
   // Input region in surface px: the union of rects, or the whole surface
   // when full. No rects and not full = no input at all (fully click-through).
@@ -49,6 +55,7 @@ signals:
   void warning(const QString &message);
 
 private:
+  QScreen *screenNamed(const QString &output, const QString &command);
   void map(QScreen *screen, const QMargins &margins);
   void unmap();
   void onFrameSwapped();
@@ -58,8 +65,12 @@ private:
 
   QQuickWindow *m_window;
   LayerShellQt::Window *m_layer;
+  // The last surface (shown or warm-up): the page is laid out at its size.
   QPointer<QScreen> m_screen;
   QMargins m_margins;
+  // The last game geometry from the backend: where a warm-up maps.
+  QPointer<QScreen> m_targetScreen;
+  QMargins m_targetMargins;
   QMetaObject::Connection m_frameSwapped;
   int m_framesToMap = 0;
   bool m_warmingUp = false;
