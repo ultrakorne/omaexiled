@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/qml">
+        <file>AppView.qml</file>
+        <file>Browser.qml</file>
+        <file>DevTools.qml</file>
+        <file>Overlay.qml</file>
+        <file>Settings.qml</file>
+    </qresource>
+</RCC>
