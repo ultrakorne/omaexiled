@@ -20,15 +20,8 @@ export interface KeyStep {
 const STEP_DELAY = 30;
 const SEND_SETTLE = 150;
 // How long a key stays down; games read input per frame.
-const KEY_HOLD = 15;
+const KEY_HOLD = 20;
 
-// xkb keysyms of the modifier keys pressed for a chord
-const MODIFIER_KEYS: Record<string, string> = {
-  CTRL: "Control_L",
-  SHIFT: "Shift_L",
-  ALT: "Alt_L",
-  SUPER: "Super_L",
-};
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const PLACEHOLDER_LAST = "@last";
@@ -120,28 +113,19 @@ export class Actions {
     return address;
   }
 
-  // Sends key steps to the PoE2 window. Wine/Proton only sees a modifier
-  // that was pressed as a key (it ignores the modifier mask on the key
-  // event), so each modifier goes down as its own key before the key and
-  // comes up after it, like a person typing the chord.
+  // Sends key steps to the PoE2 window. Each step is one call into the
+  // binds module's M.chord (binds.ts), which presses the modifiers as keys
+  // (Wine/Proton ignores the modifier mask of a key event) and the key in
+  // one go, then releases them after KEY_HOLD ms.
   async sendKeys(steps: KeyStep[]) {
-    const window = `, window = ${luaString(`address:${this.requireGame()}`)}`;
-    const send = (mods: string[], key: string, state: "down" | "up") =>
-      this.deps.hypr.dispatch(
-        `hl.dsp.send_key_state({ mods = ${luaString(mods.join(" "))}, key = ${luaString(key)}, state = "${state}"${window} })`,
-      );
+    const window = luaString(`address:${this.requireGame()}`);
     for (let i = 0; i < steps.length; i++) {
       if (i > 0) await sleep(steps[i].pauseBefore ?? STEP_DELAY);
-      const mods = steps[i].mods.split(" ").filter(Boolean);
-      for (let m = 0; m < mods.length; m++) {
-        await send(mods.slice(0, m + 1), MODIFIER_KEYS[mods[m]] ?? mods[m], "down");
-      }
-      await send(mods, steps[i].key, "down");
+      const { mods, key } = steps[i];
+      await this.deps.hypr.eval(
+        `_G.omaexiled.chord(${window}, ${luaString(mods)}, ${luaString(key)}, ${KEY_HOLD})`,
+      );
       await sleep(KEY_HOLD);
-      await send(mods, steps[i].key, "up");
-      for (let m = mods.length - 1; m >= 0; m--) {
-        await send(mods.slice(0, m), MODIFIER_KEYS[mods[m]] ?? mods[m], "up");
-      }
     }
   }
 

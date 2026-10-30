@@ -93,10 +93,10 @@ describe("Actions (keys sent over the request socket)", () => {
     };
     const actions = new Actions({
       hypr: {
-        dispatch: async (expr: string) => {
+        eval: async (expr: string) => {
           sent.push({ t: Date.now(), expr });
           // the fake game copies on the copy chord
-          if (expr.includes('key = "C"')) clip.text = "Item Class: Rings\nRarity: Rare";
+          if (expr.includes('"C", 20)')) clip.text = "Item Class: Rings\nRarity: Rare";
         },
       } as any,
       logger,
@@ -110,53 +110,38 @@ describe("Actions (keys sent over the request socket)", () => {
     return { actions, sent, clip, events };
   }
 
-  const ks = (mods: string, key: string, state: string) =>
-    `hl.dsp.send_key_state({ mods = "${mods}", key = "${key}", state = "${state}", window = "address:0xabc" })`;
-  const tap = (key: string) => [ks("", key, "down"), ks("", key, "up")];
+  const chord = (mods: string, key: string) => `_G.omaexiled.chord("address:0xabc", "${mods}", "${key}", 20)`;
 
-  test("chat: clipboard first, then each step as key presses to the game window, ~30 ms apart", async () => {
+  test("chat: clipboard first, then one chord per step to the game window, ~30 ms apart", async () => {
     const { actions, sent, clip } = setup({ address: "0xabc" });
     await actions.typeInChat("/hideout", true);
     expect(clip.writes[0]).toBe("/hideout");
     expect(sent.map((s) => s.expr)).toEqual([
-      ...tap("Return"),
-      // Wine only sees Ctrl when it is pressed as a key of its own
-      ks("CTRL", "Control_L", "down"),
-      ks("CTRL", "V", "down"),
-      ks("CTRL", "V", "up"),
-      ks("", "Control_L", "up"),
-      ...tap("Return"),
-      ...tap("Return"),
-      ...tap("Up"),
-      ...tap("Up"),
-      ...tap("Escape"),
+      chord("", "Return"),
+      chord("CTRL", "V"),
+      chord("", "Return"),
+      chord("", "Return"),
+      chord("", "Up"),
+      chord("", "Up"),
+      chord("", "Escape"),
     ]);
-    // steps are ~30 ms apart; the "restore last chat" Enter waits for the send
-    const downs = sent.filter((s) => s.expr.includes('state = "down"') && !s.expr.includes("Control_L"));
-    for (let i = 1; i < downs.length; i++) expect(downs[i].t - downs[i - 1].t).toBeGreaterThanOrEqual(25);
-    expect(downs[3].t - downs[2].t).toBeGreaterThanOrEqual(140);
+    for (let i = 1; i < sent.length; i++) expect(sent[i].t - sent[i - 1].t).toBeGreaterThanOrEqual(45);
+    // the "restore last chat" Enter waits for the game to send the line
+    expect(sent[3].t - sent[2].t).toBeGreaterThanOrEqual(160);
   });
 
   test("stash search gives the game focus back first", async () => {
     const { actions, sent, events } = setup({ address: "0xabc" });
     await actions.stashSearch("rings");
     expect(events).toEqual(["game"]);
-    // Ctrl+F, Ctrl+V (4 events each), Return (2)
-    expect(sent).toHaveLength(10);
+    expect(sent).toHaveLength(3);
   });
 
   test("copy-item: copy chord, item-text, locked activates", async () => {
     const { actions, sent, events } = setup({ address: "0xabc" });
     const text = await actions.copyItem({ type: "copy-item", target: "price-check", focusOverlay: true });
     expect(text).toStartWith("Item Class: Rings");
-    expect(sent.map((s) => s.expr)).toEqual([
-      ks("CTRL", "Control_L", "down"),
-      ks("CTRL ALT", "Alt_L", "down"),
-      ks("CTRL ALT", "C", "down"),
-      ks("CTRL ALT", "C", "up"),
-      ks("CTRL", "Alt_L", "up"),
-      ks("", "Control_L", "up"),
-    ]);
+    expect(sent.map((s) => s.expr)).toEqual([chord("CTRL ALT", "C")]);
     expect(events).toEqual([
       { target: "price-check", clipboard: text, position: { x: 5, y: 6 }, focusOverlay: true },
       "active",

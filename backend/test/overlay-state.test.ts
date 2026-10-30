@@ -87,8 +87,9 @@ function setup() {
     events.filter((e) => e.name === "MAIN->OVERLAY::focus-change").map((e) => (e as any).payload);
   const hides = () => events.filter((e) => e.name === "MAIN->OVERLAY::hide-exclusive-widget").length;
   // surface commands, without the warm-up geometry (tested on its own)
-  const surface = () => hostMsgs.filter((m) => m.type !== "overlay.prepare");
-  return { world, overlay, events, hostMsgs, panel, presence, focusChanges, hides, surface };
+  const surface = () => hostMsgs.filter((m) => m.type !== "overlay.prepare" && m.type !== "overlay.keyboard");
+  const grabs = () => hostMsgs.filter((m) => m.type === "overlay.keyboard").map((m) => m.grab);
+  return { world, overlay, events, hostMsgs, panel, presence, focusChanges, hides, surface, grabs };
 }
 
 const settle = () => Bun.sleep(10);
@@ -225,6 +226,30 @@ describe("host surface", () => {
     await settle();
     expect(surface().slice(2)).toEqual([{ type: "overlay.input", rects: [], full: true }, { type: "overlay.hide" }]);
     expect(panel).toEqual([true, false]);
+  });
+
+  test("the overlay grabs the keyboard while the cursor is over the panel or it is active", async () => {
+    const { world, overlay, grabs } = setup();
+    await overlay.refresh();
+    overlay.onRenderState(true);
+    // panel at surface (100,100)-(560,900); the surface origin is (12,38)
+    overlay.onInputRegion({ rects: [{ x: 100, y: 100, width: 460, height: 800 }], full: false });
+    await settle();
+    expect(grabs()).toEqual([]);
+    world.cursor = { x: 12 + 200, y: 38 + 300 };
+    await overlay.pollPointer();
+    expect(grabs()).toEqual([true]);
+    world.cursor = { x: 12 + 900, y: 38 + 300 };
+    await overlay.pollPointer();
+    expect(grabs()).toEqual([true, false]);
+    overlay.assertOverlayActive();
+    await settle();
+    expect(grabs()).toEqual([true, false, true]);
+    // leaving the active mode hands the keyboard back before the hide
+    overlay.assertGameActive();
+    overlay.onRenderState(false);
+    await settle();
+    expect(grabs()).toEqual([true, false, true, false]);
   });
 
   test("game blur closes a quick panel; it does not come back on focus", async () => {

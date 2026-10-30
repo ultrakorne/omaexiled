@@ -113,6 +113,8 @@ void Host::onMessage(const QJsonObject &message) {
                           r.value("width").toDouble(), r.value("height").toDouble()));
     }
     m_overlay->setInput(rects, message.value("full").toBool());
+  } else if (type == u"overlay.keyboard") {
+    m_overlay->setKeyboardGrab(message.value("grab").toBool());
   } else if (type == u"settings.open") {
     openSettings();
   } else if (type == u"settings.close") {

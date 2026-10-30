@@ -49,6 +49,10 @@ public:
   // Input region in surface px: the union of rects, or the whole surface
   // when full. No rects and not full = no input at all (fully click-through).
   void setInput(const QList<QRectF> &rects, bool full);
+  // Exclusive keyboard while the backend sees the cursor over the panel (or
+  // the overlay is active). PoE2 confines the pointer, and Hyprland only
+  // lets the pointer reach the panel once the game has lost keyboard focus.
+  void setKeyboardGrab(bool grab);
 
 signals:
   void stateChanged();
@@ -60,6 +64,7 @@ private:
   void unmap();
   void onFrameSwapped();
   void applyInput();
+  void applyKeyboard();
   void setState(bool mapped, bool keyboardFocus);
   void onScreenRemoved(QScreen *screen);
 
@@ -78,4 +83,5 @@ private:
   bool m_keyboardFocus = false;
   QRegion m_inputRegion;
   bool m_inputFull = false;
+  bool m_keyboardGrab = false;
 };

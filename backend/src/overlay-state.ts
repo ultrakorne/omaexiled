@@ -14,6 +14,9 @@ import type { Logger } from "./logger";
 type ItemText = IpcEventPayload<"MAIN->CLIENT::item-text">;
 type TrackArea = IpcEventPayload<"OVERLAY->MAIN::track-area">;
 
+// How often the cursor is checked against the panel while one is shown.
+const POINTER_POLL = 50;
+
 export interface OverlayDeps {
   hypr: Hyprland;
   logger: Logger;
@@ -235,6 +238,7 @@ export class OverlayState {
     if (!force && key === this.lastFocusSent) return;
     this.lastFocusSent = key;
     this.deps.broadcast({ name: "MAIN->OVERLAY::focus-change", payload });
+    void this.pollPointer();
   }
 
   // The current focus state for a page that just connected.
@@ -308,6 +312,55 @@ export class OverlayState {
     this.inputRegion = { rects: region.rects ?? [], full: Boolean(region.full) };
     if (this.shown) this.deps.host.send({ type: "overlay.input", ...this.inputRegion });
     this.updatePanel();
+    void this.pollPointer();
+  }
+
+  // --- keyboard grab -------------------------------------------------------
+  // PoE2 confines the pointer to its window. Hyprland honours that while
+  // the game has keyboard focus and then never hands the pointer to the
+  // panel, so hovering alone can't focus it. While a panel is shown the
+  // backend watches the cursor; over the panel (or in the active mode) the
+  // overlay takes the keyboard (exclusive), which releases the game's
+  // constraint. Off the panel the game gets the keyboard back.
+
+  private grab = false;
+  private pointerTimer?: ReturnType<typeof setInterval>;
+  private pointerPolling = false;
+
+  private updatePointerWatch() {
+    if (this.shown && !this.pointerTimer) {
+      this.pointerTimer = setInterval(() => void this.pollPointer(), POINTER_POLL);
+    } else if (!this.shown && this.pointerTimer) {
+      clearInterval(this.pointerTimer);
+      this.pointerTimer = undefined;
+      this.grab = false;
+    }
+  }
+
+  async pollPointer() {
+    if (!this.shown || this.pointerPolling || !this.deps.hypr.available) return;
+    this.pointerPolling = true;
+    try {
+      let grab = this.overlayActive || this.inputRegion.full;
+      if (!grab && this.inputRegion.rects.length) {
+        const pos = await this.deps.hypr.cursorPos();
+        const shown = this.shown;
+        if (!shown) return;
+        const x = pos.x - shown.origin.x;
+        const y = pos.y - shown.origin.y;
+        grab = this.inputRegion.rects.some(
+          (r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height,
+        );
+      }
+      if (grab !== this.grab && this.shown) {
+        this.grab = grab;
+        this.deps.host.send({ type: "overlay.keyboard", grab });
+      }
+    } catch {
+      // cursor query failed: keep the current grab until the next poll
+    } finally {
+      this.pointerPolling = false;
+    }
   }
 
   onTrackArea(opts: TrackArea) {
@@ -322,6 +375,7 @@ export class OverlayState {
   // Host (re)connected or gone: it has no surface and no geometry yet.
   onHostConnected() {
     this.shown = null;
+    this.updatePointerWatch();
     this.hostGeometry = null;
     this.updatePanel();
     this.sync();
@@ -434,6 +488,11 @@ export class OverlayState {
     }
     if (!this.shown) this.prepare();
     this.updatePanel();
+    this.updatePointerWatch();
+    if (this.shown && !wasShown) {
+      this.grab = false;
+      void this.pollPointer();
+    }
     if (wasShown !== (this.shown != null)) {
       this.deps.onChange();
     }

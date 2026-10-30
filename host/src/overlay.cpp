@@ -117,6 +117,7 @@ void Overlay::map(QScreen *screen, const QMargins &margins) {
 
 void Overlay::hide() {
   m_warmingUp = false;
+  m_keyboardGrab = false;
   // The page reports a fresh input region for the next show.
   m_inputRegion = QRegion();
   m_inputFull = false;
@@ -179,9 +180,22 @@ void Overlay::onFrameSwapped() {
   }
   // The surface is mapped now (with interactivity none, so the game kept
   // the keyboard). From here on hovering the panel may focus it.
-  m_layer->setKeyboardInteractivity(LayerWindow::KeyboardInteractivityOnDemand);
-  m_window->update();
   setState(true, m_window->isActive());
+  applyKeyboard();
+}
+
+void Overlay::setKeyboardGrab(bool grab) {
+  if (grab == m_keyboardGrab) return;
+  m_keyboardGrab = grab;
+  applyKeyboard();
+}
+
+void Overlay::applyKeyboard() {
+  // Until the map completes (onFrameSwapped) the surface stays at none.
+  if (!m_mapped || m_framesToMap > 0) return;
+  m_layer->setKeyboardInteractivity(m_keyboardGrab ? LayerWindow::KeyboardInteractivityExclusive
+                                                   : LayerWindow::KeyboardInteractivityOnDemand);
+  m_window->update(); // applies on commit
 }
 
 void Overlay::setState(bool mapped, bool keyboardFocus) {

@@ -178,6 +178,31 @@ local function handler(combo)
   end
 end
 
+-- Types one key chord into a window like a person would: Wine/Proton only
+-- sees a modifier that was pressed as a key. The presses run in this one
+-- call so a real key event (the user letting go of a hotkey modifier) can't
+-- land between Ctrl and C; the releases follow after hold ms.
+local MODIFIER_KEYS = { CTRL = "Control_L", SHIFT = "Shift_L", ALT = "Alt_L", SUPER = "Super_L" }
+function M.chord(window, mods, key, hold)
+  local list = {}
+  for m in string.gmatch(mods, "%S+") do
+    list[#list + 1] = m
+  end
+  local function send(n, k, state)
+    hl.dispatch(hl.dsp.send_key_state({ mods = table.concat(list, " ", 1, n), key = k, state = state, window = window }))
+  end
+  for i = 1, #list do
+    send(i, MODIFIER_KEYS[list[i]] or list[i], "down")
+  end
+  send(#list, key, "down")
+  hl.timer(function()
+    send(#list, key, "up")
+    for i = #list, 1, -1 do
+      send(i - 1, MODIFIER_KEYS[list[i]] or list[i], "up")
+    end
+  end, { timeout = hold, type = "oneshot" })
+end
+
 local errors = {}
 for combo, a in pairs(M.actions) do
   local b = M.binds[combo]
