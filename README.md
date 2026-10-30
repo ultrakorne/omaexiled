@@ -40,7 +40,7 @@ sudo pacman -S --needed layer-shell-qt qt6-webengine bun nodejs npm base-devel
 ## Install
 
 ```bash
-git clone <this repository> ~/Developer/OmaExiled
+git clone https://github.com/ultrakorne/omaexiled.git ~/Developer/OmaExiled
 ~/Developer/OmaExiled/bin/omaexiled install
 ```
 
