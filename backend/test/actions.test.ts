@@ -131,9 +131,10 @@ describe("Actions (keys sent over the request socket)", () => {
       ...tap("Up"),
       ...tap("Escape"),
     ]);
-    // steps are ~30 ms apart; a key stays down for a moment
+    // steps are ~30 ms apart; the "restore last chat" Enter waits for the send
     const downs = sent.filter((s) => s.expr.includes('state = "down"') && !s.expr.includes("Control_L"));
     for (let i = 1; i < downs.length; i++) expect(downs[i].t - downs[i - 1].t).toBeGreaterThanOrEqual(25);
+    expect(downs[3].t - downs[2].t).toBeGreaterThanOrEqual(140);
   });
 
   test("stash search gives the game focus back first", async () => {

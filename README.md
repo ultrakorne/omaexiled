@@ -70,7 +70,7 @@ Hover an item in game and press a hotkey:
 | Price check | `Ctrl+D` | Hold `Ctrl`: the panel closes when you let go and move the mouse away, unless the mouse went into the panel |
 | Price check, locked | `Ctrl+Alt+D` | The panel stays and takes the keyboard; click outside or press `Esc` to close |
 | Item check | `Alt+D` | Item info with wiki, poedb and Craft of Exile links |
-| Overlay key | `Shift+Space` | Switches the overlay between passive and active; with nothing shown it reopens the last price check |
+| Overlay key | `Shift+Space` | Switches the overlay between passive and active (shows the menu, as in EE2) |
 | Close | `Esc` | Only while a panel is shown; otherwise `Esc` goes to the game |
 | Chat: `/hideout` | `F5` | |
 | Chat: `/exit` | `F9` | Omarchy's dictation also uses `F9` (see Troubleshooting) |

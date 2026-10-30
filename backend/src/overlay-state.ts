@@ -67,7 +67,6 @@ export class OverlayState {
   hostMapped = false;
   hostKeyboardFocus = false;
   private inputRegion: { rects: InputRect[]; full: boolean } = { rects: [], full: false };
-  private lastPriceCheck?: ItemText;
   private blurTimer?: ReturnType<typeof setTimeout>;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private warnedFullscreen = false;
@@ -274,16 +273,10 @@ export class OverlayState {
     }
   };
 
-  // Overlay key (Shift + Space). Port addition: with nothing on screen it
-  // re-opens the last price check, active.
+  // Overlay key (Shift + Space), as in EE2: toggles the active overlay
+  // (menu plus whatever widgets are open).
   toggleOverlay() {
     this.tracker.stop();
-    if (!this.overlayActive && !this.shouldShow && !this.shown && this.lastPriceCheck) {
-      this.sendItemText({ ...this.lastPriceCheck, focusOverlay: true });
-      this.isOverlayKeyUsed = true;
-      this.assertOverlayActive();
-      return;
-    }
     this.toggleActiveState();
   }
 
@@ -300,7 +293,6 @@ export class OverlayState {
 
   sendItemText(payload: ItemText) {
     this.gameGone = false;
-    if (payload.target === "price-check") this.lastPriceCheck = payload;
     this.deps.sendItemText(payload);
   }
 

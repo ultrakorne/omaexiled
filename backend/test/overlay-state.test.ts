@@ -186,16 +186,16 @@ describe("focus model (EE2 OverlayWindow)", () => {
     expect(focusChanges().at(-1)).toEqual({ game: false, overlay: false, usingHotkey: false });
   });
 
-  test("overlay key with nothing shown re-opens the last price check, active", async () => {
+  test("overlay key toggles the active overlay (EE2), it does not re-open the last check", async () => {
     const { overlay, events } = setup();
     await overlay.refresh();
-    overlay.toggleOverlay(); // nothing to re-open: just activates
+    overlay.toggleOverlay();
     expect(overlay.overlayActive).toBe(true);
     overlay.toggleOverlay();
+    expect(overlay.overlayActive).toBe(false);
     overlay.sendItemText({ target: "price-check", clipboard: "Item Class: X", position: { x: 1, y: 2 }, focusOverlay: false });
     overlay.toggleOverlay();
-    const texts = events.filter((e) => e.name === "MAIN->CLIENT::item-text").map((e) => (e as any).payload);
-    expect(texts.at(-1)).toEqual({ target: "price-check", clipboard: "Item Class: X", position: { x: 1, y: 2 }, focusOverlay: true });
+    expect(events.filter((e) => e.name === "MAIN->CLIENT::item-text")).toHaveLength(1);
     expect(overlay.overlayActive).toBe(true);
   });
 

@@ -241,7 +241,8 @@ Steps:
 
 Expected: (1) the panel becomes active (dimmed background); the keyboard
 moves to the panel once the mouse moves (as in test 8). (2) back to passive.
-(3) the last price check reopens.
+(3) the overlay becomes active with EE2's menu (settings cog, widget
+buttons); `Shift+Space` again closes it.
 
 If it fails, report: what happened at each step, whether the game also got
 `Shift+Space`.

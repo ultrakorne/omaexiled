@@ -145,11 +145,17 @@ void Overlay::setInput(const QList<QRectF> &rects, bool full) {
 }
 
 void Overlay::applyInput() {
-  // QWindow::setMask(empty) means "whole surface", so an empty input region
-  // needs WindowTransparentForInput instead.
-  const bool none = !m_inputFull && m_inputRegion.isEmpty();
-  m_window->setMask(m_inputFull ? QRegion() : m_inputRegion);
-  m_window->setFlag(Qt::WindowTransparentForInput, none);
+  // Always an explicit, non-empty region: QWindow::setMask(empty) means
+  // "whole surface", and mixing it with WindowTransparentForInput left the
+  // full (active) region click-through. "None" is a 1 px rect outside the
+  // surface, "full" one larger than any output; the compositor clips both.
+  static const QRegion kNone(-1, -1, 1, 1);
+  static const QRegion kFull(0, 0, 1 << 15, 1 << 15);
+  const QRegion region = m_inputFull ? kFull : m_inputRegion.isEmpty() ? kNone : m_inputRegion;
+  // Qt skips a mask equal to the last one, even when the wl_surface was
+  // re-created by hide()/show() since; the reset forces it through.
+  m_window->setMask(QRegion());
+  m_window->setMask(region);
   if (m_window->isVisible()) m_window->update(); // input region applies on commit
 }
 

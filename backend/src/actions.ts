@@ -14,9 +14,11 @@ import type { OverlayState } from "./overlay-state";
 export interface KeyStep {
   mods: string; // Hyprland modifier names, "" for none
   key: string; // xkb keysym
+  pauseBefore?: number; // ms, instead of STEP_DELAY
 }
 
 const STEP_DELAY = 30;
+const SEND_SETTLE = 150;
 // How long a key stays down; games read input per frame.
 const KEY_HOLD = 15;
 
@@ -69,8 +71,9 @@ export function chatKeySequence(text: string, send: boolean): { clipboard: strin
 
   if (send) {
     keys.push(k("Return"));
-    // restore the last chat
-    keys.push(k("Return"));
+    // restore the last chat; the game needs a moment to send and close the
+    // chat first, or this Enter sends the line again
+    keys.push({ ...k("Return"), pauseBefore: SEND_SETTLE });
     keys.push(k("Up"));
     keys.push(k("Up"));
     keys.push(k("Escape"));
@@ -128,7 +131,7 @@ export class Actions {
         `hl.dsp.send_key_state({ mods = ${luaString(mods.join(" "))}, key = ${luaString(key)}, state = "${state}"${window} })`,
       );
     for (let i = 0; i < steps.length; i++) {
-      if (i > 0) await sleep(STEP_DELAY);
+      if (i > 0) await sleep(steps[i].pauseBefore ?? STEP_DELAY);
       const mods = steps[i].mods.split(" ").filter(Boolean);
       for (let m = 0; m < mods.length; m++) {
         await send(mods.slice(0, m + 1), MODIFIER_KEYS[mods[m]] ?? mods[m], "down");
@@ -143,10 +146,9 @@ export class Actions {
   }
 
   async runBind(bind: Bind) {
-    if (this.deps.logKeys()) {
-      this.deps.logger.write(`debug [Shortcuts] Action type: ${bind.action.type}`);
-    }
     const action = bind.action;
+    const detail = "text" in action ? ` ${JSON.stringify(action.text)}` : "target" in action ? ` ${action.target}` : "";
+    this.deps.logger.write(`info [Shortcuts] ${bind.shortcut}: ${action.type}${detail}`);
     switch (action.type) {
       case "toggle-overlay":
         this.deps.overlay.toggleOverlay();

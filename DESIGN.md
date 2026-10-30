@@ -345,7 +345,7 @@ id to the `HostConfig.shortcuts` entry. PoE2 is the window whose class is
 | item check | `Alt+D` | same, target `item-check`, active |
 | chat command | `F5` `/hideout`, `F9` `/exit`, … | EE2's three `@last` branches with `send_shortcut` steps, then Enter, Enter, Up, Up, Esc when `send` |
 | stash search | configured | `Ctrl+F`, `Ctrl+V`, `Enter` |
-| overlay key | `Shift+Space` | toggle active; if nothing is shown, re-open the last price check |
+| overlay key | `Shift+Space` | toggle active (EE2: the menu plus open widgets) |
 
 Copy chord = `Ctrl+C` merged with PoE2's "show advanced item descriptions"
 key from its ini (default Alt), i.e. `Ctrl+Alt+C`. Keys are sent from the
