@@ -61,7 +61,7 @@ live inside omarchy-shell.
                  self-gating Lua binds (pass through unless PoE2 is focused)
  Hyprland ───────── socket2: custom>>omaexiled:<action>, activewindow, … ─────────┐
     ▲                                                                              ▼
-    │ request socket: /eval, /dispatch send_shortcut, j/cursorpos …   ┌──────────────────────┐
+    │ request socket: /eval (M.chord, binds), j/cursorpos …          ┌──────────────────────┐
     └─────────────────────────────────────────────────────────────────┤   backend (Bun, TS)  │
                                                                       │ HTTP 127.0.0.1:8584  │
  wl-copy / wl-paste ◀─────────────────────────────────────────────────┤ WS /events?role=…    │
@@ -168,7 +168,8 @@ Backend → host:
 | `overlay.show` | `output` (monitor name), `rect {x,y,width,height}` (game window, monitor-local logical px) | map the overlay surface on that output with margins so it covers `rect`; no-op if already mapped there |
 | `overlay.prepare` | `output`, `rect` (as `overlay.show`) | remember the game geometry; if the overlay is not mapped, warm the page up there (below) so its viewport is the game window; if mapped, only remember it. Sent on host connect and whenever the PoE2 window's output or rect changes while the overlay is hidden |
 | `overlay.hide` | | unmap (QWindow::hide destroys the layer surface) |
-| `overlay.input` | `rects[]`, `full` | `setMask()` to the union of `rects`, or the whole surface when `full`; then `update()` to commit |
+| `overlay.input` | `rects[]`, `full` | input region: the union of `rects`, or the whole surface when `full`; always an explicit `setMask()` region, then `update()` to commit (see `docs/GOTCHAS.md`) |
+| `overlay.keyboard` | `grab` | `true`: keyboard interactivity `exclusive` (the overlay takes the keyboard); `false`: `on_demand`. Applied once the surface is mapped |
 | `settings.open` | | show / raise the settings window (`/?mode=settings`) |
 | `settings.close` | | hide it |
 | `browser.open` | `url` | open the in-app browser window at `url` |
@@ -228,10 +229,14 @@ The host owns one overlay layer surface on the monitor that shows PoE2:
   widgets' rectangles (price panel, related-items column, open tooltips /
   popovers) while inactive, the whole surface while active;
 - keyboard: mapped with `none`, then `on_demand` once the first frame is
-  shown. The game keeps the keyboard; hovering the panel gives it the
-  keyboard; moving back over the game returns it. In the active mode too the
-  keyboard only moves to the overlay with the next pointer motion (`Esc` and
-  the overlay key work either way, they are binds).
+  shown, so the game keeps the keyboard. PoE2 confines the pointer to its
+  window, and Hyprland then never hands the pointer to the overlay, so
+  hovering alone cannot focus the panel. While a panel is shown the backend
+  polls the cursor every 50 ms and sends `overlay.keyboard {grab}`: `true`
+  while the cursor is over one of the input-region rects or the overlay is
+  active (the exclusive grab takes the game's keyboard focus away, which
+  releases its pointer constraint, so the panel gets hover and clicks),
+  `false` otherwise (the game gets the keyboard back).
 
 Because the surface is the game window, the renderer runs in EE2's **overlay
 mode** (the old `Host.isElectron` branch, now driven by `?mode=overlay`) and
@@ -340,26 +345,30 @@ id to the `HostConfig.shortcuts` entry. PoE2 is the window whose class is
 
 | Action | Default | Backend steps |
 |---|---|---|
-| price check (quick) | `Ctrl+D` | sentinel → clipboard, `send_shortcut` copy chord to the PoE2 window, poll `wl-paste` (48 ms initial, every 48 ms, 500 ms limit), `item-text {focusOverlay:false}`, `track-area` hold mode |
+| price check (quick) | `Ctrl+D` | sentinel → clipboard, copy chord to the PoE2 window (`M.chord`), poll `wl-paste` (48 ms initial, every 48 ms, 500 ms limit), `item-text {focusOverlay:false}`, `track-area` hold mode |
 | price check (locked) | `Ctrl+Alt+D` | same with `focusOverlay:true` → active overlay |
 | item check | `Alt+D` | same, target `item-check`, active |
-| chat command | `F5` `/hideout`, `F9` `/exit`, … | EE2's three `@last` branches with `send_shortcut` steps, then Enter, Enter, Up, Up, Esc when `send` |
+| chat command | `F5` `/hideout`, `F9` `/exit`, … | EE2's three `@last` branches as `M.chord` steps, then Enter, (150 ms) Enter, Up, Up, Esc when `send` |
 | stash search | configured | `Ctrl+F`, `Ctrl+V`, `Enter` |
 | overlay key | `Shift+Space` | toggle active (EE2: the menu plus open widgets) |
 
 Copy chord = `Ctrl+C` merged with PoE2's "show advanced item descriptions"
-key from its ini (default Alt), i.e. `Ctrl+Alt+C`. Keys are sent from the
-backend over the request socket (a full press/release per step, ~30 ms
-apart), never from inside a bind callback. Clipboard restore waits 300 ms.
+key from its ini (default Alt), i.e. `Ctrl+Alt+C`. Each key step is one
+`/eval` of `_G.omaexiled.chord(window, mods, key, 20)` from the binds module:
+it presses every modifier as a key of its own (`Control_L`, `Alt_L`, …;
+Wine ignores the modifier mask of a key event), then the key, all in that
+one call so no real key event can land in between, and releases them 20 ms
+later with `hl.timer`. Steps are ~30 ms apart; never sent from inside a bind
+callback. Clipboard restore waits 300 ms.
 Two more trigger modes are settings (Settings, Price check; both off by
 default), sent as the optional `HostConfig` booleans: `gameCopyBind`, a
 pass-through bind on the game's own copy chord, and `clipboardWatch`, a
 passive clipboard watch (`wl-paste --watch`, only while PoE2 is focused).
 
-Known conflicts on this machine: Omarchy binds `F9` (dictation) and the
-user's config binds `Ctrl+Alt+D` (old prototype script). Both would fire
-together with ours while PoE2 is focused; the backend logs every combo that
-already has a non-OmaExiled bind.
+Known conflict on this machine: Omarchy binds `F9` (dictation); both fire
+together with `/exit` while PoE2 is focused. The backend logs every combo
+that already has a non-OmaExiled bind at startup (the user's old
+`Ctrl+Alt+D` prototype bind was found this way and removed).
 
 
 ## Repository layout

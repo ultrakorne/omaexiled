@@ -115,16 +115,19 @@ match the language setting.
 
 ## Path of Exile 2 settings
 
-- **Display mode.** Still to be confirmed in game: start with *Windowed
-  Fullscreen*. If `Ctrl+D` copies nothing or clicks on the panel go to the
-  game, switch to *Windowed* and report it (see `docs/IN-GAME-TESTS.md`).
-- **Confine mouse to window** must be **off**. With it on, the mouse cannot
-  reach the price panel.
+- **Display mode.** *Windowed Fullscreen* (borderless, full screen) is tested
+  and works. Plain *Fullscreen* is untested since the click fix.
+- **Confine mouse to window** can stay off; OmaExiled already copes with the
+  confinement Wine applies (see `docs/GOTCHAS.md`).
 - Keep the "show advanced item descriptions" key on its default (`Alt`) unless
   you need to change it; OmaExiled reads it from the game's config to copy
   items with full mod text.
 
 ## Troubleshooting
+
+Known pitfalls (clicks going through the panel, `v` typed instead of a
+paste, the Character panel opening on `Ctrl+D`, searches without a click)
+and their fixes are in [`docs/GOTCHAS.md`](docs/GOTCHAS.md).
 
 ```bash
 omaexiled status          # service, bar widget and backend state
