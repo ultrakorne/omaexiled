@@ -30,8 +30,12 @@ Commands:
   ctl <cmd> ...   Send a command to the running backend (omaexiled ctl lists them)
   status          Show the service, bar widget and backend state
   logs [args]     Follow the service log (journalctl --user -u $unit_name -f)
-  install         Build, install the systemd unit, the bar widget and
-                  ~/.local/bin/omaexiled, then enable and start the service
+  start           Start the service (or click "Start OmaExiled" in the bar)
+  stop            Stop the service (or "Quit" in the bar menu)
+  install [--autostart]
+                  Build, install the systemd unit, the bar widget and
+                  ~/.local/bin/omaexiled. The service is started now but not
+                  at login unless --autostart is given
   uninstall       Undo install; your settings in $config_dir are kept
   update-plugin   Copy the bar widget to $plugin_dest again
   disable-binds   Let the hotkeys reach the game again right away (the
@@ -212,19 +216,33 @@ place_widget() {
 }
 
 enable_service() {
-  local was_active=0
+  local autostart=$1 was_active=0
   systemctl --user is-active --quiet "$unit_name" && was_active=1
   say "systemctl --user daemon-reload"
   systemctl --user daemon-reload
-  say "systemctl --user enable --now $unit_name"
-  systemctl --user enable --now "$unit_name"
+  if ((autostart)); then
+    say "systemctl --user enable $unit_name (start at login)"
+    systemctl --user enable "$unit_name"
+  elif systemctl --user is-enabled --quiet "$unit_name" 2>/dev/null; then
+    say "systemctl --user disable $unit_name (no start at login)"
+    systemctl --user disable "$unit_name"
+  fi
   if ((was_active)); then
     say "systemctl --user restart $unit_name (load the new build)"
     systemctl --user restart "$unit_name"
+  else
+    say "systemctl --user start $unit_name"
+    systemctl --user start "$unit_name"
   fi
 }
 
 cmd_install() {
+  local autostart=0
+  case ${1:-} in
+    --autostart) autostart=1 ;;
+    "") ;;
+    *) die "unknown install option: $1" ;;
+  esac
   check_repo_path
   command -v jq >/dev/null 2>&1 || die "jq not found (sudo pacman -S jq)"
 
@@ -242,10 +260,13 @@ cmd_install() {
   place_widget
 
   step "Service"
-  enable_service
+  enable_service "$autostart"
 
   say ""
-  say "OmaExiled is installed. Start Path of Exile 2 and press Ctrl+D over an item."
+  say "OmaExiled is installed and running. Start Path of Exile 2 and press Ctrl+D over an item."
+  if ((!autostart)); then
+    say "It does not start at login: use the bar widget or 'omaexiled start' / 'omaexiled stop'."
+  fi
   say "Status: omaexiled status    Logs: omaexiled logs"
 }
 
@@ -360,7 +381,9 @@ cmd=${1:-}
 case $cmd in
   run) cmd_run "$@" ;;
   ctl) cmd_ctl "$@" ;;
-  install) cmd_install ;;
+  start) systemctl --user start "$unit_name" ;;
+  stop) systemctl --user stop "$unit_name" ;;
+  install) cmd_install "$@" ;;
   uninstall) cmd_uninstall ;;
   status) cmd_status ;;
   logs) cmd_logs "$@" ;;

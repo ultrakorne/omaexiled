@@ -54,7 +54,10 @@ the bar widget to `~/.config/omarchy/plugins/omaexiled/` and puts it on the
 right side of the bar. It is safe to run again after `git pull`: it rebuilds,
 updates what changed and restarts the service.
 
-The service starts with your graphical session. On first start, settings from
+The service does **not** start at login: start it when you play, from the bar
+widget (**Start OmaExiled**) or with `omaexiled start`, and stop it with
+**Quit** or `omaexiled stop`. To start it with every graphical session instead,
+install with `omaexiled install --autostart`. On first start, settings from
 an Exiled Exchange 2 install (`~/.config/exiled-exchange-2/apt-data/config.json`)
 are imported once.
 
@@ -148,8 +151,8 @@ omaexiled ctl             # every control command
   keys come back by themselves within 15 seconds; `omaexiled disable-binds`
   gives them back right away.
 - **Quit stays quit.** After **Quit** the service stays stopped until you
-  click **Start OmaExiled**, run `systemctl --user start omaexiled`, or log in
-  again.
+  click **Start OmaExiled** or run `omaexiled start` (with `--autostart` it
+  also starts at the next login).
 - **Developer tools.** `omaexiled ctl devtools overlay` (or `settings`) opens
   Chromium DevTools for that page.
 
