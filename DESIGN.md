@@ -93,13 +93,44 @@ The host owns one overlay layer surface per game monitor:
   otherwise, so nothing covers the game when idle;
 - its **input region** is the union of the visible widget rectangles that the
   renderer reports; everything else passes through to the game;
-- keyboard interactivity is `none` while mapped, so the game keeps the
-  keyboard. Details of when it switches to `on_demand` (to type into a filter
-  field) are in the host section below.
+- it maps with keyboard interactivity `none` and switches to `on_demand`
+  after the first frame (followed by a commit). The game keeps the keyboard;
+  hovering the panel gives the panel the keyboard (to type into a filter
+  field, or Esc), and moving back over the game returns it.
 
 Because the surface covers the game, the renderer keeps EE2's own placement
 logic (panel left or right of the item, the check-position circle) in page
 coordinates.
+
+## Verified platform behavior
+
+Measured on this machine (Hyprland 0.56.2, Lua config, NVIDIA) with
+`tools/fake-poe`, an xcb window titled "Path of Exile 2" with class
+`steam_app_2694490`, fullscreen like the real game:
+
+| Question | Result |
+|---|---|
+| Overlay layer surface above a fullscreen XWayland window | drawn on top |
+| `QWindow::setMask()` on a full-monitor layer surface | becomes the input region; pointer motion and clicks outside it reach the game |
+| Keyboard interactivity `on_demand` set **before** map | steals keyboard focus from the game on map |
+| Map with `none`, then switch to `on_demand` | game keeps the keyboard. Pointer over the panel focuses the panel; pointer back over the game returns focus to the game |
+| Switching interactivity at runtime | only applies after a surface commit: call `QQuickWindow::update()` after `setKeyboardInteractivity()` |
+| `hl.dsp.send_key_state` Ctrl+Alt+C to the XWayland window | received; its X11 clipboard copy is visible to `wl-paste` within 400 ms |
+| `hyprctl eval 'hl.bind(...)'` / `hl.unbind(...)` at runtime | works; `hl.unbind` removes **every** bind on that combo |
+| Mouse button via `send_key_state { key = "mouse:272" }` | delivered as a click |
+
+Hyprland Lua API names in use: `hl.bind`, `hl.unbind`, `hl.dispatch`,
+`hl.dsp.send_key_state`, `hl.dsp.send_shortcut`, `hl.dsp.cursor.move`,
+`hl.timer`, `hl.get_active_window`, `hl.get_cursor_pos`, `hl.is_key_down`,
+`hl.layer_rule`, `hl.window_rule`, `hl.on`. `hyprctl dispatch` takes Lua
+dispatcher expressions, not the old `dispatcher args` strings. Send keys as a
+`down` then, after a short `hl.timer`, an `up` (Omarchy's
+`bindings/clipboard.lua` does the same to avoid stuck synthetic keys).
+
+Not verifiable without the game: whether Wine/Proton accepts the injected
+keys like Qt's xcb backend does, and whether PoE2 confines the pointer to its
+window (which would keep pointer focus off the panel). Both are on the in-game
+checklist.
 
 ## Hotkeys
 

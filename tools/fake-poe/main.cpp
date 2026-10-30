@@ -28,6 +28,7 @@ public:
   explicit FakePoe(const QString &itemsDir) {
     setWindowTitle("Path of Exile 2");
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);
     QDir dir(itemsDir);
     for (const QString &name : dir.entryList({"*.txt"}, QDir::Files, QDir::Name)) {
       QFile f(dir.filePath(name));
@@ -86,6 +87,20 @@ protected:
     update();
   }
 
+  void mouseMoveEvent(QMouseEvent *e) override {
+    const QPoint p = e->position().toPoint();
+    // One line per 50px cell keeps the log readable while proving that
+    // pointer motion reached the game through the overlay.
+    const QPoint cell(p.x() / 50, p.y() / 50);
+    if (cell != lastCell) log(QString("MOUSE_MOVE x=%1 y=%2").arg(p.x()).arg(p.y()));
+    lastCell = cell;
+  }
+
+  void mousePressEvent(QMouseEvent *e) override {
+    const QPoint p = e->position().toPoint();
+    log(QString("MOUSE_PRESS x=%1 y=%2 button=%3").arg(p.x()).arg(p.y()).arg(int(e->button())));
+  }
+
   void paintEvent(QPaintEvent *) override {
     QPainter p(this);
     p.fillRect(rect(), QColor(18, 14, 10));
@@ -115,13 +130,16 @@ private:
   bool selectAll = false;
   QString status = "ready";
   QString logPath;
+  QPoint lastCell{-1, -1};
 };
 
 int main(int argc, char **argv) {
   qputenv("QT_QPA_PLATFORM", "xcb");
   QApplication app(argc, argv);
   app.setApplicationName("steam_app_2694490");
-  const QString itemsDir = argc > 1 ? argv[1] : QString(SRCDIR) + "/items";
+  QString itemsDir = QString(SRCDIR) + "/items";
+  for (const QString &arg : app.arguments().mid(1))
+    if (!arg.startsWith("--")) itemsDir = arg;
   FakePoe w(itemsDir);
   if (app.arguments().contains("--fullscreen")) w.showFullScreen();
   else { w.resize(1280, 800); w.show(); }
