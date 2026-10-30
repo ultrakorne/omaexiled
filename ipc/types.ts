@@ -82,6 +82,7 @@ export type IpcEvent =
   | IpcOverlayRenderState
   | IpcHideExclusiveWidget
   | IpcTrackArea
+  | IpcInputRegion
   // events used by any type of Client:
   | IpcSaveConfig
   | IpcUpdaterState
@@ -95,7 +96,9 @@ export type IpcEvent =
   | IpcConfigChanged
   | IpcUserAction
   | IpcWriteToFile
-  | IpcReparseLog;
+  | IpcReparseLog
+  | IpcOpenSettings
+  | IpcOpenBrowser;
 
 export type IpcEventPayload<
   Name extends IpcEvent["name"],
@@ -103,6 +106,31 @@ export type IpcEventPayload<
 > = T extends { name: Name; payload: infer P } ? P : never;
 
 type IpcOverlayAttached = Event<"MAIN->OVERLAY::overlay-attached">;
+
+export interface InputRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// OmaExiled: interactive parts of the overlay page in surface CSS px.
+// The host turns them into the layer surface's input region; the rest of
+// the surface passes input through to the game. `full` while active.
+type IpcInputRegion = Event<
+  "OVERLAY->MAIN::input-region",
+  {
+    rects: InputRect[];
+    full: boolean;
+  }
+>;
+
+// OmaExiled: open the settings toplevel window.
+type IpcOpenSettings = Event<"CLIENT->MAIN::open-settings", {}>;
+
+// OmaExiled: open the in-app browser window (pathofexile.com captcha or
+// login); its cookies are shared with the backend proxy.
+type IpcOpenBrowser = Event<"CLIENT->MAIN::open-browser", { url: string }>;
 
 type IpcFocusChange = Event<
   "MAIN->OVERLAY::focus-change",
