@@ -199,6 +199,9 @@
             }}</span>
           </ui-toggle>
         </div>
+        <ui-checkbox class="mb-4" v-model="searchOnHover">{{
+          t(":search_on_hover")
+        }}</ui-checkbox>
       </div>
       <div class="mb-2 mx-2">
         <div class="flex-1 mb-1">{{ t(":extra_delay") }}</div>
@@ -310,6 +313,10 @@ export default defineComponent({
       lockedInitialSearch: configModelValue(
         () => configWidget.value,
         "lockedInitialSearch",
+      ),
+      searchOnHover: configModelValue(
+        () => configWidget.value,
+        "searchOnHover",
       ),
       rememberCurrency: configModelValue(
         () => configWidget.value,

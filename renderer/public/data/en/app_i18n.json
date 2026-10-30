@@ -415,6 +415,7 @@
     "warn_expensive": "Settings below are a compromise between increasing load on PoE website and convenient price checking / more accurate search.",
     "accurate_collapsed": "Show indication on collapsed listings",
     "auto_search": "Perform an auto search, when pressing",
+    "search_on_hover": "Search when the mouse moves from the filters onto the Search button",
     "select_stock": "Always select \"Stock\" filter",
     "show_prediction": "Show price prediction",
     "remember_currency": "Remember the Buyout Currency filter",

@@ -46,6 +46,9 @@ export interface PriceCheckWidget extends Widget {
   collapseListings: "api" | "app";
   smartInitialSearch: boolean;
   lockedInitialSearch: boolean;
+  // OmaExiled: EE2 searches when the mouse moves from the filters onto the
+  // Search button; off here so only a click searches
+  searchOnHover: boolean;
   activateStockFilter: boolean;
   showCursor: boolean;
   builtinBrowser: boolean;

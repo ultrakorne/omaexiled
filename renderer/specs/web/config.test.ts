@@ -113,7 +113,7 @@ function expectValid(config: Config) {
   expect(new Set(ids).size).toBe(ids.length);
   // OverlayWindow's topmostWidget needs a numeric z-order
   expect(config.widgets.some((w) => typeof w.wmZorder === "number")).toBe(true);
-  expect(config.configVersion).toBe(37);
+  expect(config.configVersion).toBe(38);
 }
 
 function hostConfig(config: Config) {
@@ -169,6 +169,17 @@ describe("upgradeConfig", () => {
     expectValid(config);
     expect(config.gameCopyBind).toBe(false);
     expect(config.clipboardWatch).toBe(false);
+  });
+
+  it("turns off search on hover for older configs (search only on click)", () => {
+    const v37: any = defaultConfig();
+    v37.configVersion = 37;
+    const pc = v37.widgets.find((w: any) => w.wmType === "price-check");
+    delete pc.searchOnHover;
+    const config = upgradeConfig(v37);
+    expectValid(config);
+    const upgraded: any = config.widgets.find((w) => w.wmType === "price-check");
+    expect(upgraded.searchOnHover).toBe(false);
   });
 
   it("keeps the copy triggers of its own configs", () => {

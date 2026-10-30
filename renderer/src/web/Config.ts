@@ -161,7 +161,7 @@ export interface Config {
 }
 
 export const defaultConfig = (): Config => ({
-  configVersion: 37,
+  configVersion: 38,
   overlayKey: "Shift + Space",
   overlayBackground: "rgba(129, 139, 149, 0.15)",
   overlayBackgroundClose: true,
@@ -828,6 +828,15 @@ function upgradeConfig(_config: Config): Config {
     config.clipboardWatch = false;
 
     config.configVersion = 37;
+  }
+
+  if (config.configVersion < 38) {
+    // NOTE: OmaExiled, search only on click (EE2 also searched when the
+    // mouse moved from the filters onto the Search button)
+    const priceCheck = config.widgets.find((w) => w.wmType === "price-check");
+    if (priceCheck) (priceCheck as widget.PriceCheckWidget).searchOnHover = false;
+
+    config.configVersion = 38;
   }
   /* eslint-enable */
 

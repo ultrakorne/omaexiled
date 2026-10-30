@@ -269,6 +269,7 @@ export default defineComponent({
 
     function handleSearchMouseenter(e: MouseEvent) {
       if (
+        widget.value.searchOnHover &&
         (filtersComponent.value.$el as HTMLElement).contains(
           e.relatedTarget as HTMLElement,
         )
