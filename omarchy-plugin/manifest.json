@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "omaexiled",
+  "name": "OmaExiled",
+  "version": "0.1.0",
+  "author": "OmaExiled",
+  "license": "MIT",
+  "description": "Path of Exile 2 price checker (Exiled Exchange 2 port): status, settings, browser, config folder, quit.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "OmaExiledWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaExiled",
+    "description": "PoE2 price-check status and menu (replaces the Exiled Exchange 2 tray icon).",
+    "category": "Games",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "hideWhenStopped": false,
+      "startCommand": "systemctl --user start omaexiled.service",
+      "socketPath": "",
+      "configDir": ""
+    },
+    "schema": [
+      {
+        "key": "hideWhenStopped",
+        "type": "boolean",
+        "label": "Hide when stopped",
+        "defaultValue": false,
+        "description": "Remove the icon from the bar while the OmaExiled backend is not running."
+      },
+      {
+        "key": "startCommand",
+        "type": "string",
+        "label": "Start command",
+        "defaultValue": "systemctl --user start omaexiled.service",
+        "description": "Run by the Start item (bash -lc) when the backend is not running."
+      },
+      {
+        "key": "socketPath",
+        "type": "path",
+        "label": "Backend socket",
+        "defaultValue": "",
+        "description": "Empty means $XDG_RUNTIME_DIR/omaexiled/shell.sock."
+      },
+      {
+        "key": "configDir",
+        "type": "path",
+        "label": "Config folder",
+        "defaultValue": "",
+        "description": "Opened by 'Open config folder' while the backend is not running. Empty means ~/.config/omaexiled."
+      }
+    ]
+  }
+}

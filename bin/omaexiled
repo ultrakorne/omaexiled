@@ -1,0 +1,349 @@
+#!/bin/bash
+
+# OmaExiled entry point: runs the backend, forwards control commands to it,
+# and installs / removes the systemd user unit, the omarchy-shell bar widget
+# and the ~/.local/bin link. See README.md and DESIGN.md.
+
+set -euo pipefail
+
+self=$(readlink -f "${BASH_SOURCE[0]}")
+repo=$(cd "$(dirname "$self")/.." && pwd)
+
+unit_name=omaexiled.service
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+unit_path="$unit_dir/$unit_name"
+link_path="$HOME/.local/bin/omaexiled"
+plugin_id=omaexiled
+plugin_src="$repo/omarchy-plugin"
+# omarchy-shell reads plugins from this exact path (no XDG_CONFIG_HOME).
+plugins_dir="$HOME/.config/omarchy/plugins"
+plugin_dest="$plugins_dir/$plugin_id"
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omaexiled"
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaexiled"
+
+usage() {
+  cat <<USAGE
+Usage: omaexiled <command> [args...]
+
+Commands:
+  run             Run the backend in the foreground (what the systemd unit runs)
+  ctl <cmd> ...   Send a command to the running backend (omaexiled ctl lists them)
+  status          Show the service, bar widget and backend state
+  logs [args]     Follow the service log (journalctl --user -u $unit_name -f)
+  install         Build, install the systemd unit, the bar widget and
+                  ~/.local/bin/omaexiled, then enable and start the service
+  uninstall       Undo install; your settings in $config_dir are kept
+  update-plugin   Copy the bar widget to $plugin_dest again
+  help            Show this help
+USAGE
+}
+
+say() { printf '%s\n' "$*"; }
+step() { printf '\n== %s\n' "$*"; }
+warn() { printf 'omaexiled: %s\n' "$*" >&2; }
+die() {
+  warn "$*"
+  exit 1
+}
+
+bun_bin() {
+  if command -v bun >/dev/null 2>&1; then
+    command -v bun
+  elif [[ -x $HOME/.bun/bin/bun ]]; then
+    echo "$HOME/.bun/bin/bun"
+  else
+    die "bun not found (install it with: sudo pacman -S bun)"
+  fi
+}
+
+backend_main() {
+  local main="$repo/backend/src/main.ts"
+  [[ -f $main ]] || die "backend not found: $main"
+  echo "$main"
+}
+
+shell_running() {
+  command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell shell ping >/dev/null 2>&1
+}
+
+unit_installed() {
+  [[ -f $unit_path ]]
+}
+
+# The plugin as omarchy-shell sees it: {id, enabled, ...} or nothing.
+shell_plugin_entry() {
+  omarchy-shell shell listPlugins 2>/dev/null |
+    jq -c --arg id "$plugin_id" '.[] | select(.id == $id)' 2>/dev/null || true
+}
+
+# --- run / ctl -------------------------------------------------------------
+
+cmd_run() {
+  local bun main
+  bun=$(bun_bin)
+  main=$(backend_main)
+  exec "$bun" "$main" run "$@"
+}
+
+cmd_ctl() {
+  local bun main
+  bun=$(bun_bin)
+  main=$(backend_main)
+  exec "$bun" "$main" ctl "$@"
+}
+
+# --- install ----------------------------------------------------------------
+
+install_unit() {
+  # Written into ExecStart= unquoted: whitespace, quotes, backslashes and
+  # systemd's % specifiers would all change its meaning.
+  local unsafe='[[:space:]"'"'"'\\%]'
+  if [[ $repo =~ $unsafe ]]; then
+    die "the checkout path must not contain spaces, quotes, backslashes or %: $repo"
+  fi
+
+  local rendered
+  rendered=$(<"$repo/packaging/$unit_name")
+  rendered=${rendered//@REPO@/"$repo"}
+  mkdir -p "$unit_dir"
+  if [[ -f $unit_path ]] && [[ $(<"$unit_path") == "$rendered" ]]; then
+    say "systemd unit up to date: $unit_path"
+  else
+    printf '%s\n' "$rendered" >"$unit_path"
+    say "Installed systemd unit: $unit_path"
+  fi
+}
+
+install_link() {
+  mkdir -p "$(dirname "$link_path")"
+  if [[ -L $link_path && $(readlink -f "$link_path") == "$self" ]]; then
+    say "Command link up to date: $link_path"
+  elif [[ -e $link_path && ! -L $link_path ]]; then
+    warn "$link_path exists and is not a link; leaving it alone"
+  else
+    ln -sfn "$self" "$link_path"
+    say "Linked $link_path -> $self"
+  fi
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) warn "$HOME/.local/bin is not on PATH; run $self directly" ;;
+  esac
+}
+
+# Copies the widget as plain files (the shell refuses symlinks inside a
+# plugin and does not watch a symlinked plugin dir for changes).
+install_plugin() {
+  if command -v omarchy >/dev/null 2>&1; then
+    omarchy plugin validate "$plugin_src" || die "bar widget failed validation: $plugin_src"
+  fi
+  if [[ -d $plugin_dest && ! -L $plugin_dest ]] && diff -rq "$plugin_src" "$plugin_dest" >/dev/null 2>&1; then
+    say "Bar widget up to date: $plugin_dest"
+    return
+  fi
+
+  # Stage in a hidden directory (the shell's plugin watcher ignores those) and
+  # swap it in, so the shell reloads once and only sees complete files.
+  local stage="$plugins_dir/.$plugin_id.new.$$" old="$plugins_dir/.$plugin_id.old.$$"
+  mkdir -p "$plugins_dir"
+  rm -rf "$stage" "$old"
+  cp -R "$plugin_src" "$stage"
+  if [[ -e $plugin_dest || -L $plugin_dest ]]; then
+    mv "$plugin_dest" "$old"
+  fi
+  mv "$stage" "$plugin_dest"
+  rm -rf "$old"
+  say "Installed bar widget: $plugin_dest"
+}
+
+place_widget() {
+  local enable_hint="omarchy plugin enable $plugin_id --section right --after omarchy.tray"
+  if ! shell_running; then
+    warn "omarchy-shell is not running; add the widget to the bar later with: $enable_hint"
+    return
+  fi
+
+  # The copy triggers a rescan; wait until the shell knows the plugin.
+  omarchy-shell -q shell rescanPlugins
+  local entry="" i
+  for i in {1..50}; do
+    entry=$(shell_plugin_entry)
+    [[ -n $entry ]] && break
+    sleep 0.2
+  done
+  if [[ -z $entry ]]; then
+    warn "omarchy-shell has not picked up the widget; add it later with: $enable_hint"
+    return
+  fi
+
+  if jq -e '.enabled == true' <<<"$entry" >/dev/null; then
+    say "Bar widget already on the bar"
+  elif omarchy plugin enable "$plugin_id" --section right --after omarchy.tray; then
+    :
+  else
+    # No omarchy.tray on this bar: let the shell pick the spot in the section.
+    omarchy plugin enable "$plugin_id" --section right
+  fi
+}
+
+enable_service() {
+  local was_active=0
+  systemctl --user is-active --quiet "$unit_name" && was_active=1
+  say "systemctl --user daemon-reload"
+  systemctl --user daemon-reload
+  say "systemctl --user enable --now $unit_name"
+  systemctl --user enable --now "$unit_name"
+  if ((was_active)); then
+    say "systemctl --user restart $unit_name (load the new build)"
+    systemctl --user restart "$unit_name"
+  fi
+}
+
+cmd_install() {
+  command -v jq >/dev/null 2>&1 || die "jq not found (sudo pacman -S jq)"
+
+  step "Building"
+  make -C "$repo" build
+
+  step "systemd user unit"
+  install_unit
+
+  step "Command"
+  install_link
+
+  step "Bar widget"
+  install_plugin
+  place_widget
+
+  step "Service"
+  enable_service
+
+  say ""
+  say "OmaExiled is installed. Start Path of Exile 2 and press Ctrl+D over an item."
+  say "Status: omaexiled status    Logs: omaexiled logs"
+}
+
+# --- uninstall --------------------------------------------------------------
+
+cmd_uninstall() {
+  step "Service"
+  if unit_installed || systemctl --user cat "$unit_name" >/dev/null 2>&1; then
+    say "systemctl --user disable --now $unit_name"
+    systemctl --user disable --now "$unit_name" || warn "could not stop $unit_name"
+  else
+    say "No systemd unit installed"
+  fi
+  if unit_installed; then
+    rm -f "$unit_path"
+    say "Removed $unit_path"
+    systemctl --user daemon-reload
+    systemctl --user reset-failed "$unit_name" 2>/dev/null || true
+  fi
+  if [[ -d $runtime_dir ]]; then
+    rm -rf "$runtime_dir"
+    say "Removed $runtime_dir"
+  fi
+
+  step "Bar widget"
+  if shell_running; then
+    if jq -e '.enabled == true' <<<"$(shell_plugin_entry)" >/dev/null 2>&1; then
+      omarchy plugin disable "$plugin_id"
+    else
+      say "Bar widget not on the bar"
+    fi
+  elif [[ -e $plugin_dest ]]; then
+    warn "omarchy-shell is not running; remove the widget from the bar later with: omarchy plugin disable $plugin_id"
+  fi
+  if [[ -L $plugin_dest ]]; then
+    rm -f "$plugin_dest"
+    say "Removed $plugin_dest"
+  elif [[ -d $plugin_dest ]]; then
+    if [[ $(jq -r '.id // ""' "$plugin_dest/manifest.json" 2>/dev/null) == "$plugin_id" ]]; then
+      rm -rf "$plugin_dest"
+      say "Removed $plugin_dest"
+    else
+      warn "$plugin_dest is not the OmaExiled widget; leaving it alone"
+    fi
+  else
+    say "Bar widget not installed"
+  fi
+
+  step "Command"
+  if [[ -L $link_path && $(readlink -f "$link_path") == "$self" ]]; then
+    rm -f "$link_path"
+    say "Removed $link_path"
+  elif [[ -e $link_path || -L $link_path ]]; then
+    warn "$link_path does not point to this checkout; leaving it alone"
+  else
+    say "No command link"
+  fi
+
+  say ""
+  say "OmaExiled is uninstalled. Your settings are still in $config_dir (delete it to remove them)."
+}
+
+# --- status / logs / update-plugin -------------------------------------------
+
+cmd_status() {
+  local active enabled entry
+  active=$(systemctl --user is-active "$unit_name" 2>/dev/null || true)
+  enabled=$(systemctl --user is-enabled "$unit_name" 2>/dev/null || true)
+  say "service:    ${active:-unknown} (${enabled:-not installed})"
+
+  if [[ -f $plugin_dest/manifest.json ]]; then
+    local where="bar state unknown (omarchy-shell not running)"
+    if shell_running; then
+      entry=$(shell_plugin_entry)
+      if [[ -z $entry ]]; then
+        where="not loaded by omarchy-shell"
+      elif jq -e '.enabled == true' <<<"$entry" >/dev/null; then
+        where="on the bar"
+      else
+        where="not on the bar (omarchy plugin enable $plugin_id)"
+      fi
+    fi
+    say "bar widget: v$(jq -r '.version' "$plugin_dest/manifest.json"), $where"
+  else
+    say "bar widget: not installed"
+  fi
+
+  if [[ -S $runtime_dir/shell.sock ]]; then
+    say "backend:"
+    cmd_ctl status
+  else
+    say "backend:    not running"
+    [[ $active == active ]] || return 3
+  fi
+}
+
+cmd_logs() {
+  exec journalctl --user -u "$unit_name" -n 100 -f "$@"
+}
+
+cmd_update_plugin() {
+  install_plugin
+}
+
+# ---------------------------------------------------------------------------
+
+cmd=${1:-}
+(($#)) && shift
+
+case $cmd in
+  run) cmd_run "$@" ;;
+  ctl) cmd_ctl "$@" ;;
+  install) cmd_install ;;
+  uninstall) cmd_uninstall ;;
+  status) cmd_status ;;
+  logs) cmd_logs "$@" ;;
+  update-plugin) cmd_update_plugin ;;
+  help | -h | --help) usage ;;
+  "")
+    usage >&2
+    exit 1
+    ;;
+  *)
+    warn "unknown command: $cmd"
+    usage >&2
+    exit 1
+    ;;
+esac

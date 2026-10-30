@@ -1,0 +1,23 @@
+# OmaExiled backend (systemd user unit). `bin/omaexiled install` copies this
+# to ~/.config/systemd/user/ with @REPO@ replaced by the checkout path.
+#
+# The environment comes from the user manager: uwsm imports WAYLAND_DISPLAY,
+# HYPRLAND_INSTANCE_SIGNATURE, DISPLAY and PATH into it when the Hyprland
+# session starts (check with `systemctl --user show-environment`).
+
+[Unit]
+Description=OmaExiled (Path of Exile 2 price checker)
+Documentation=file://@REPO@/README.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@REPO@/bin/omaexiled run
+# "Quit" in the bar menu exits with status 0, which on-failure leaves stopped.
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=10
+
+[Install]
+WantedBy=graphical-session.target
