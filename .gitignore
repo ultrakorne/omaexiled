@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+.env.local
+.env.*.local
+.DS_Store
+.idea
+.vscode
+host/build/
