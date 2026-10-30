@@ -58,49 +58,179 @@ live inside omarchy-shell.
 ## Processes
 
 ```
-Hyprland ──binds (only while PoE2 is focused)──▶ omaexiled ctl <action>
-   ▲   │ socket2 events (active window, open/close)       │ HTTP POST /api/ctl
-   │   ▼                                                  ▼
-   │  ┌──────────────────────── backend (Bun) ─────────────────────────┐
-   └──┤ Hyprland IPC · clipboard (wl-paste/wl-copy) · config store      │
- sendshortcut │ HTTP: renderer, /data, /proxy/*, /api/*  · WS /events   │
-      └──────────────┬───────────────────────────────────▲─────────────┘
-           stdio JSON│                                   │ WS /events (EE2 protocol)
-                     ▼                                   │
-      ┌──────────── host (Qt) ───────────┐     ┌─────────┴──────────┐
-      │ overlay layer surface ───────────┼─────▶ renderer page       │
-      │ settings toplevel window ────────┼─────▶ renderer page       │
-      └──────────────────────────────────┘     └────────────────────┘
-      omarchy-shell bar widget ──HTTP /api/status, /api/action──▶ backend
+                 self-gating Lua binds (pass through unless PoE2 is focused)
+ Hyprland ───────── socket2: custom>>omaexiled:<action>, activewindow, … ─────────┐
+    ▲                                                                              ▼
+    │ request socket: /eval, /dispatch send_shortcut, j/cursorpos …   ┌──────────────────────┐
+    └─────────────────────────────────────────────────────────────────┤   backend (Bun, TS)  │
+                                                                      │ HTTP 127.0.0.1:8584  │
+ wl-copy / wl-paste ◀─────────────────────────────────────────────────┤ WS /events?role=…    │
+                                                                      │ host.sock · shell.sock│
+                                                                      └──┬─────────▲────▲────┘
+                                           host.sock (NDJSON) commands   │         │    │ shell.sock (NDJSON)
+                                                                         ▼         │    │
+                         ┌──────────────── host (Qt 6, QML) ────────────────┐      │  ┌─┴──────────────────────┐
+                         │ overlay layer surface  → /?mode=overlay  ────────┼─WS───┤  │ omarchy-shell bar widget│
+                         │ settings toplevel      → /?mode=settings ────────┼─WS───┤  └────────────────────────┘
+                         │ in-app browser (captcha/login, exports cookies)  │      │
+                         └──────────────────────────────────────────────────┘      │
+                           user's browser → http://127.0.0.1:8584/ (EE2 browser mode) ─WS┘
 ```
 
-- `omaexiled.service` (systemd user unit, `PartOf=graphical-session.target`)
-  runs the backend.
-- The backend starts the host when PoE2 appears (so the first price check
-  is instant) or when a window is requested, and stops it a while after PoE2
-  closes. It restarts a crashed host.
-- Backend and host talk newline-delimited JSON over the host's stdin/stdout.
-- Each renderer page talks to the backend over the EE2 WebSocket protocol,
-  so most renderer code is unchanged.
+- `omaexiled.service` (systemd user unit, `PartOf=graphical-session.target`,
+  `Restart=on-failure` so "Quit" stays quit) runs `bin/omaexiled run`.
+- The backend starts the host when PoE2's window appears (the overlay page is
+  preloaded so the first price check is instant) or when a window is
+  requested, stops it 10 minutes after PoE2 closes and no window is open, and
+  restarts it if it crashes.
+- All runtime files live in `$XDG_RUNTIME_DIR/omaexiled/`: `host.sock`,
+  `shell.sock`, `shell.ready`, `binds.lua`.
+- Config lives in `~/.config/omaexiled/` (`config.json` written verbatim from
+  the renderer like EE2, `host-config.json` = last `HostConfig`, `cookies.json`
+  mode 0600). On first run, if `~/.config/exiled-exchange-2/apt-data/config.json`
+  exists it is imported once (the renderer migrates it).
+- HTTP listens on `127.0.0.1:8584` (`OMAEXILED_PORT` overrides). A fixed port
+  keeps the pages' origin, and so their storage, stable. 8584 is also EE2's dev
+  port, so `vite` dev proxying works unchanged.
+
+## Contracts
+
+### Renderer ↔ backend (WebSocket `/events`)
+
+EE2's protocol is kept: JSON text frames `{name, payload}` (`payload` absent
+when empty), event names and payloads from `ipc/types.ts`. Changes:
+
+- **Roles.** Pages connect to `/events?role=overlay|settings|browser` (the
+  renderer derives the role from its `?mode=` page parameter; no parameter =
+  `browser`). `item-text` goes to `overlay` clients only (never "last active");
+  if none is connected the backend starts the host and queues the event until
+  the overlay page connects (5 s timeout). Everything else that EE2 broadcast
+  is still broadcast.
+- **Security.** HTTP and WS requests must have `Host` equal to
+  `127.0.0.1:<port>` or `localhost:<port>`. WS upgrades and `/proxy` requests
+  that carry an `Origin` must have our origin. Anything else gets 403.
+- **Kept, unchanged:** `CLIENT->MAIN::save-config`, `MAIN->CLIENT::config-changed`
+  (broadcast incl. sender), `CLIENT->MAIN::update-host-config`,
+  `CLIENT->MAIN::used-recently`, `CLIENT->MAIN::user-action` (`quit`,
+  `stash-search`), `MAIN->CLIENT::log-entry` (history on connect),
+  `MAIN->CLIENT::item-text`, `MAIN->OVERLAY::focus-change`,
+  `MAIN->OVERLAY::hide-exclusive-widget`, `OVERLAY->MAIN::render-state`,
+  `OVERLAY->MAIN::focus-game`, `OVERLAY->MAIN::track-area`.
+- **`item-text.position`** is the cursor at key press in **overlay-surface
+  coordinates** (CSS px relative to the game window's top-left), so EE2's
+  `position - window.screenX` math keeps working (`screenX` is 0 on Wayland).
+- **New events** (add to `ipc/types.ts`):
+  - `OVERLAY->MAIN::input-region {rects: {x,y,width,height}[], full: boolean}`:
+    the overlay page's interactive rectangles in surface CSS px. `full: true`
+    while the overlay is active. Sent whenever the set changes (rAF-debounced).
+  - `CLIENT->MAIN::open-settings {}`: open the settings toplevel window.
+  - `CLIENT->MAIN::open-browser {url: string}`: open the in-app browser
+    window (captcha / login on pathofexile.com).
+  - `MAIN->CLIENT::updater-state` is answered with
+    `{state: "update-not-available", checkedAt}`; there is no updater.
+- **Dropped:** `widget-action`, `ocr-text`, `game-log`, `write-data`,
+  `re-parse-log`, `visibility`, `overlay-attached`, `/uploads`.
+
+### HTTP
+
+- `GET /config` → `HostState {contents: string|null, version, updater}`.
+  Invalid JSON on disk is moved aside to `config.json.bad-<ts>` and served as
+  `null`.
+- `GET /<static>` from `renderer/dist` at origin root, `.js` as
+  `text/javascript`, `/data/**` with `Cache-Control: no-cache`, path traversal
+  rejected.
+- `ANY /proxy/<host>/<raw path+query>` → `https://<host>/…`, path not
+  decoded. Allow-list and header rules are in
+  `docs/port-notes/05-trade-api-and-price-sources.md` (proxy spec). Cookies
+  for the official PoE hosts come from the backend jar (fed by the host's
+  in-app browser and an optional `POESESSID` setting). The User-Agent is the
+  host's Chromium UA (reported in the host `hello`), so a Cloudflare
+  `cf_clearance` obtained in the in-app browser stays valid.
+
+### Backend ↔ host (`host.sock`, NDJSON)
+
+The backend listens; the host is started as
+`omaexiled-host --socket <path> --url http://127.0.0.1:<port>` and connects.
+Chromium child processes inherit stdout, so the protocol never uses stdio.
+Every message is one JSON object with a `type`.
+
+Backend → host:
+
+| type | fields | effect |
+|---|---|---|
+| `overlay.show` | `output` (monitor name), `rect {x,y,width,height}` (game window, monitor-local logical px) | map the overlay surface on that output with margins so it covers `rect`; no-op if already mapped there |
+| `overlay.hide` | | unmap (QWindow::hide destroys the layer surface) |
+| `overlay.input` | `rects[]`, `full` | `setMask()` to the union of `rects`, or the whole surface when `full`; then `update()` to commit |
+| `settings.open` | | show / raise the settings window (`/?mode=settings`) |
+| `settings.close` | | hide it |
+| `browser.open` | `url` | open the in-app browser window at `url` |
+| `devtools` | `target` | open DevTools for `overlay` / `settings` |
+| `quit` | | exit |
+
+Host → backend:
+
+| type | fields | when |
+|---|---|---|
+| `hello` | `version`, `userAgent` | after connecting |
+| `overlay.state` | `mapped`, `keyboardFocus` | on change |
+| `window.closed` | `window` (`settings`/`browser`) | user closed it |
+| `cookies` | `cookies[] {name,value,domain,path,expires,secure,httpOnly}` | on any cookie change for `pathofexile.com` domains |
+| `log` | `level`, `message` | host diagnostics |
+
+Overlay page rules handled inside the host: map with keyboard interactivity
+`none`, switch to `on_demand` after the first frame, `setActivateOnShow(false)`,
+no context menu, `newWindowRequested` / `window.open` → `xdg-open` via
+`QDesktopServices`, transparent background.
+
+### Backend ↔ bar widget (`shell.sock`, NDJSON)
+
+As specified and verified in `docs/port-notes/09-omarchy-shell-plugin.md` §8:
+on connect `hello`, then a full `state` (re-sent on every change); widget
+commands `open-settings`, `quit` (plus `open-browser`, `toggle-overlay`).
+`shell.ready` is written after listening. The same socket serves
+`omaexiled ctl <command> [args]` (one JSON request, one JSON reply).
 
 ## Overlay model
 
-The host owns one overlay layer surface per game monitor:
+The host owns one overlay layer surface on the monitor that shows PoE2:
 
-- anchored to all four edges of the monitor that shows PoE2, on the
-  `overlay` layer, exclusive zone `-1`, namespace `omaexiled`;
-- mapped only while a widget (price check, item check) is visible, unmapped
-  otherwise, so nothing covers the game when idle;
-- its **input region** is the union of the visible widget rectangles that the
-  renderer reports; everything else passes through to the game;
-- it maps with keyboard interactivity `none` and switches to `on_demand`
-  after the first frame (followed by a commit). The game keeps the keyboard;
-  hovering the panel gives the panel the keyboard (to type into a filter
-  field, or Esc), and moving back over the game returns it.
+- layer `overlay`, exclusive zone `-1`, namespace `omaexiled`, anchored to
+  all four edges with margins so it covers exactly the game window (the whole
+  monitor for fullscreen PoE2). A runtime `no_anim` layer rule for
+  `^omaexiled$` removes Omarchy's fade-in;
+- mapped only while the overlay page wants to show something
+  (`render-state {shouldShow}`), destroyed otherwise, so the game keeps direct
+  scanout when idle;
+- the **input region** is what the page reports (`input-region`): the visible
+  widgets' rectangles (price panel, related-items column, open tooltips /
+  popovers) while inactive, the whole surface while active;
+- keyboard: mapped with `none`, then `on_demand` after the first frame. The
+  game keeps the keyboard; hovering the panel gives it the keyboard; moving
+  back over the game returns it.
 
-Because the surface covers the game, the renderer keeps EE2's own placement
-logic (panel left or right of the item, the check-position circle) in page
-coordinates.
+Because the surface is the game window, the renderer runs in EE2's **overlay
+mode** (the old `Host.isElectron` branch, now driven by `?mode=overlay`) and
+keeps EE2's own geometry: panel left or right of the item
+(`innerHeight * 986/1600` panel offset), the related-items column, the
+check-position circle.
+
+### Active vs inactive (EE2 semantics, kept)
+
+| | inactive (quick check) | active (locked check, item check, Shift+Space) |
+|---|---|---|
+| input region | widget rectangles | whole surface (dim background, click outside closes) |
+| keyboard | game, until the pointer is over the panel | overlay (pointer is over it) |
+| close | hold-mode rules, Esc, close button | Esc, background click, close button, overlay key |
+
+The backend owns the state: it sends `focus-change {game, overlay}` exactly
+like EE2's main process (`overlay` = active) and the renderer keeps the
+`wasActive` guard from the user's `omarchy_new` branch.
+
+Hold mode (quick check, `focusOverlay: false`) reproduces
+`WidgetAreaTracker`: the backend polls `j/cursorpos` every 50 ms after
+`track-area`; the panel closes (`hide-exclusive-widget`) when the cursor never
+entered the panel area, the hold key is released and the cursor is more than
+`closeThreshold` from the press point. Entering the panel area stops tracking.
 
 ## Verified platform behavior
 
@@ -134,19 +264,73 @@ checklist.
 
 ## Hotkeys
 
-The backend watches Hyprland's event socket. While the active window is
-PoE2 it installs the configured binds through Hyprland IPC; when focus
-leaves PoE2 it removes them, so `Ctrl+D` and `F5` behave normally in other
-apps. Each bind runs `omaexiled ctl <action>`.
+At start, on every `configreloaded>>` and whenever `HostConfig` changes, the
+backend writes `$XDG_RUNTIME_DIR/omaexiled/binds.lua` and runs
+`dofile(...)` through `/eval`. The module keeps its state in
+`_G.omaexiled`:
 
-| Action | Default | What the backend does |
+- one `hl.bind(combo, callback, {auto_consuming = true, dont_inhibit = true,
+  description = "OmaExiled: …"})` per combo, created once per Lua state and
+  later only `set_enabled(true/false)` (never `hl.unbind` / `remove`, which
+  would also delete the user's binds on that combo);
+- the callback returns `{ ok = false }` (key passes through to the focused
+  window) unless the backend is alive (`_G.omaexiled.enabled`), the active
+  window is PoE2 and the combo maps to an action; then it calls
+  `hl.dispatch(hl.dsp.event("omaexiled:<actionId>"))` and the key is consumed;
+- `Escape` is bound the same way but only acts while a panel is visible
+  (`_G.omaexiled.panel`, set by the backend);
+- `_G.omaexiled.enabled = false` on backend shutdown.
+
+The backend receives `custom>>omaexiled:<actionId>` on socket2 and maps the
+id to the `HostConfig.shortcuts` entry. PoE2 is the window whose class is
+`steam_app_2694490` or whose title equals `HostConfig.windowTitle`
+("Path of Exile 2").
+
+| Action | Default | Backend steps |
 |---|---|---|
-| price check | `Ctrl+D` | sendshortcut `Ctrl+Alt+C` to PoE2, wait for item text on the clipboard, show the price check |
-| item check | `Alt+D` | same copy, then show the item check |
-| chat command | `F5` `/hideout`, `F9` `/exit`, … | put text on the clipboard, send Enter, paste, Enter |
-| stash search | configured | focus the stash search box, paste, Enter |
-| overlay | `Shift+Space` | toggle the last widget |
+| price check (quick) | `Ctrl+D` | sentinel → clipboard, `send_shortcut` copy chord to the PoE2 window, poll `wl-paste` (48 ms initial, every 48 ms, 500 ms limit), `item-text {focusOverlay:false}`, `track-area` hold mode |
+| price check (locked) | `Ctrl+Alt+D` | same with `focusOverlay:true` → active overlay |
+| item check | `Alt+D` | same, target `item-check`, active |
+| chat command | `F5` `/hideout`, `F9` `/exit`, … | EE2's three `@last` branches with `send_shortcut` steps, then Enter, Enter, Up, Up, Esc when `send` |
+| stash search | configured | `Ctrl+F`, `Ctrl+V`, `Enter` |
+| overlay key | `Shift+Space` | toggle active; if nothing is shown, re-open the last price check |
 
+Copy chord = `Ctrl+C` merged with PoE2's "show advanced item descriptions"
+key from its ini (default Alt), i.e. `Ctrl+Alt+C`. Keys are sent from the
+backend over the request socket (a full press/release per step, ~30 ms
+apart), never from inside a bind callback. Clipboard restore waits 300 ms.
 Two more trigger modes are settings: a pass-through bind on the game's own
-`Ctrl+C` / `Ctrl+Alt+C`, and a passive clipboard watch that opens a price
-check for any copied item.
+copy chord, and a passive clipboard watch (`wl-paste --watch`, only while
+PoE2 is focused).
+
+Known conflicts on this machine: Omarchy binds `F9` (dictation) and the
+user's config binds `Ctrl+Alt+D` (old prototype script). Both would fire
+together with ours while PoE2 is focused; the backend logs every combo that
+already has a non-OmaExiled bind.
+
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| `renderer/` | EE2's Vue app, trimmed (vendored from upstream `cca30662`; `git log -- renderer` shows every change) |
+| `ipc/` | event types shared by renderer and backend |
+| `backend/` | Bun backend (`src/`, `test/`) |
+| `host/` | Qt 6 host (`omaexiled-host.pro`, `src/`, `qml/`) |
+| `omarchy-plugin/` | bar widget, copied to `~/.config/omarchy/plugins/omaexiled/` |
+| `bin/omaexiled` | entry point: `run`, `ctl`, `install`, `uninstall`, `status` |
+| `packaging/` | systemd user unit |
+| `tools/fake-poe/` | fake PoE2 XWayland window for tests |
+| `docs/port-notes/` | EE2 subsystem notes (the porting reference) |
+
+## Build, run, test
+
+- `make` builds the renderer (`npm ci`, `make-index-files`, `vite build`),
+  the host (`qmake6 && make`), the fake game, and installs backend deps.
+- `make test` runs the renderer suite (vitest, must stay at upstream's
+  527 passing minus tests of dropped features) and the backend suite
+  (`bun test`).
+- `bin/omaexiled install` builds, installs the systemd unit, the bar widget
+  and `~/.local/bin/omaexiled`, and enables the service.
+- `tools/fake-poe` plus `bin/omaexiled ctl` drive end-to-end tests without
+  the game; `docs/IN-GAME-TESTS.md` is the checklist that needs the real one.
