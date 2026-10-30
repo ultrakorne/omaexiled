@@ -1,8 +1,7 @@
 // What happens when a hotkey fires: port of EE2 Shortcuts.register()
 // callbacks, text-box.ts and pressKeysToCopyItemText. Keys are sent from
-// here over Hyprland's request socket (`send_shortcut` sends press and
-// release in one call when not inside a bind callback), one step at a time,
-// ~30 ms apart.
+// here over Hyprland's request socket with `send_key_state` (modifiers as
+// real key presses, see sendKeys), one step at a time, ~30 ms apart.
 import type { ShortcutAction } from "../../ipc/types";
 import type { Bind } from "./binds";
 import type { HostClipboard } from "./clipboard";
@@ -18,6 +17,16 @@ export interface KeyStep {
 }
 
 const STEP_DELAY = 30;
+// How long a key stays down; games read input per frame.
+const KEY_HOLD = 15;
+
+// xkb keysyms of the modifier keys pressed for a chord
+const MODIFIER_KEYS: Record<string, string> = {
+  CTRL: "Control_L",
+  SHIFT: "Shift_L",
+  ALT: "Alt_L",
+  SUPER: "Super_L",
+};
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const PLACEHOLDER_LAST = "@last";
@@ -75,8 +84,8 @@ export function stashSearchSequence(text: string): { clipboard: string; keys: Ke
 }
 
 // EE2 pressKeysToCopyItemText: Ctrl + C merged with the game's "show
-// advanced item descriptions" key. send_shortcut sets the modifiers
-// explicitly, so held hotkey modifiers need no release dance.
+// advanced item descriptions" key; sendKeys presses the modifiers as keys,
+// so a hotkey modifier the user still holds does no harm.
 export function copyChord(showModsKey: string): KeyStep {
   const keys = copyItemShortcut(showModsKey).split(" + ");
   const mods = keys
@@ -108,15 +117,28 @@ export class Actions {
     return address;
   }
 
-  // Sends key steps to the PoE2 window.
+  // Sends key steps to the PoE2 window. Wine/Proton only sees a modifier
+  // that was pressed as a key (it ignores the modifier mask on the key
+  // event), so each modifier goes down as its own key before the key and
+  // comes up after it, like a person typing the chord.
   async sendKeys(steps: KeyStep[]) {
     const window = `, window = ${luaString(`address:${this.requireGame()}`)}`;
+    const send = (mods: string[], key: string, state: "down" | "up") =>
+      this.deps.hypr.dispatch(
+        `hl.dsp.send_key_state({ mods = ${luaString(mods.join(" "))}, key = ${luaString(key)}, state = "${state}"${window} })`,
+      );
     for (let i = 0; i < steps.length; i++) {
       if (i > 0) await sleep(STEP_DELAY);
-      const { mods, key } = steps[i];
-      await this.deps.hypr.dispatch(
-        `hl.dsp.send_shortcut({ mods = ${luaString(mods)}, key = ${luaString(key)}${window} })`,
-      );
+      const mods = steps[i].mods.split(" ").filter(Boolean);
+      for (let m = 0; m < mods.length; m++) {
+        await send(mods.slice(0, m + 1), MODIFIER_KEYS[mods[m]] ?? mods[m], "down");
+      }
+      await send(mods, steps[i].key, "down");
+      await sleep(KEY_HOLD);
+      await send(mods, steps[i].key, "up");
+      for (let m = mods.length - 1; m >= 0; m--) {
+        await send(mods.slice(0, m), MODIFIER_KEYS[mods[m]] ?? mods[m], "up");
+      }
     }
   }
 

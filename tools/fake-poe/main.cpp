@@ -25,8 +25,8 @@
 
 class FakePoe : public QWidget {
 public:
-  explicit FakePoe(const QString &itemsDir) {
-    setWindowTitle("Path of Exile 2");
+  explicit FakePoe(const QString &itemsDir, const QString &title) {
+    setWindowTitle(title);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     QDir dir(itemsDir);
@@ -136,11 +136,18 @@ private:
 int main(int argc, char **argv) {
   qputenv("QT_QPA_PLATFORM", "xcb");
   QApplication app(argc, argv);
-  app.setApplicationName("steam_app_2694490");
+  // --class / --title let a test window run next to a real PoE2 without
+  // OmaExiled taking it for the game.
   QString itemsDir = QString(SRCDIR) + "/items";
-  for (const QString &arg : app.arguments().mid(1))
-    if (!arg.startsWith("--")) itemsDir = arg;
-  FakePoe w(itemsDir);
+  QString wmClass = "steam_app_2694490", title = "Path of Exile 2";
+  const QStringList args = app.arguments().mid(1);
+  for (int i = 0; i < args.size(); i++) {
+    if (args[i] == "--class" && i + 1 < args.size()) wmClass = args[++i];
+    else if (args[i] == "--title" && i + 1 < args.size()) title = args[++i];
+    else if (!args[i].startsWith("--")) itemsDir = args[i];
+  }
+  app.setApplicationName(wmClass);
+  FakePoe w(itemsDir, title);
   if (app.arguments().contains("--fullscreen")) w.showFullScreen();
   else { w.resize(1280, 800); w.show(); }
   return app.exec();

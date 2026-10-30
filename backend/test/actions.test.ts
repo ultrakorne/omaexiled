@@ -110,27 +110,38 @@ describe("Actions (keys sent over the request socket)", () => {
     return { actions, sent, clip, events };
   }
 
-  test("chat: clipboard first, then one send_shortcut per step, ~30 ms apart, to the game window", async () => {
+  const ks = (mods: string, key: string, state: string) =>
+    `hl.dsp.send_key_state({ mods = "${mods}", key = "${key}", state = "${state}", window = "address:0xabc" })`;
+  const tap = (key: string) => [ks("", key, "down"), ks("", key, "up")];
+
+  test("chat: clipboard first, then each step as key presses to the game window, ~30 ms apart", async () => {
     const { actions, sent, clip } = setup({ address: "0xabc" });
     await actions.typeInChat("/hideout", true);
     expect(clip.writes[0]).toBe("/hideout");
     expect(sent.map((s) => s.expr)).toEqual([
-      'hl.dsp.send_shortcut({ mods = "", key = "Return", window = "address:0xabc" })',
-      'hl.dsp.send_shortcut({ mods = "CTRL", key = "V", window = "address:0xabc" })',
-      'hl.dsp.send_shortcut({ mods = "", key = "Return", window = "address:0xabc" })',
-      'hl.dsp.send_shortcut({ mods = "", key = "Return", window = "address:0xabc" })',
-      'hl.dsp.send_shortcut({ mods = "", key = "Up", window = "address:0xabc" })',
-      'hl.dsp.send_shortcut({ mods = "", key = "Up", window = "address:0xabc" })',
-      'hl.dsp.send_shortcut({ mods = "", key = "Escape", window = "address:0xabc" })',
+      ...tap("Return"),
+      // Wine only sees Ctrl when it is pressed as a key of its own
+      ks("CTRL", "Control_L", "down"),
+      ks("CTRL", "V", "down"),
+      ks("CTRL", "V", "up"),
+      ks("", "Control_L", "up"),
+      ...tap("Return"),
+      ...tap("Return"),
+      ...tap("Up"),
+      ...tap("Up"),
+      ...tap("Escape"),
     ]);
-    for (let i = 1; i < sent.length; i++) expect(sent[i].t - sent[i - 1].t).toBeGreaterThanOrEqual(25);
+    // steps are ~30 ms apart; a key stays down for a moment
+    const downs = sent.filter((s) => s.expr.includes('state = "down"') && !s.expr.includes("Control_L"));
+    for (let i = 1; i < downs.length; i++) expect(downs[i].t - downs[i - 1].t).toBeGreaterThanOrEqual(25);
   });
 
   test("stash search gives the game focus back first", async () => {
     const { actions, sent, events } = setup({ address: "0xabc" });
     await actions.stashSearch("rings");
     expect(events).toEqual(["game"]);
-    expect(sent).toHaveLength(3);
+    // Ctrl+F, Ctrl+V (4 events each), Return (2)
+    expect(sent).toHaveLength(10);
   });
 
   test("copy-item: copy chord, item-text, locked activates", async () => {
@@ -138,7 +149,12 @@ describe("Actions (keys sent over the request socket)", () => {
     const text = await actions.copyItem({ type: "copy-item", target: "price-check", focusOverlay: true });
     expect(text).toStartWith("Item Class: Rings");
     expect(sent.map((s) => s.expr)).toEqual([
-      'hl.dsp.send_shortcut({ mods = "CTRL ALT", key = "C", window = "address:0xabc" })',
+      ks("CTRL", "Control_L", "down"),
+      ks("CTRL ALT", "Alt_L", "down"),
+      ks("CTRL ALT", "C", "down"),
+      ks("CTRL ALT", "C", "up"),
+      ks("CTRL", "Alt_L", "up"),
+      ks("", "Control_L", "up"),
     ]);
     expect(events).toEqual([
       { target: "price-check", clipboard: text, position: { x: 5, y: 6 }, focusOverlay: true },
