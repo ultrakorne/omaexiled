@@ -178,7 +178,9 @@ Host → backend:
 | `log` | `level`, `message` | host diagnostics |
 
 Overlay page rules handled inside the host: map with keyboard interactivity
-`none`, switch to `on_demand` after the first frame, `setActivateOnShow(false)`,
+`none`, switch to `on_demand` once the compositor has shown the first frame
+(Qt's second frame swap; switching right after the first commit still takes
+the keyboard from the game), `setActivateOnShow(false)`,
 no context menu, `newWindowRequested` / `window.open` → `xdg-open` via
 `QDesktopServices`, transparent background.
 
@@ -204,9 +206,11 @@ The host owns one overlay layer surface on the monitor that shows PoE2:
 - the **input region** is what the page reports (`input-region`): the visible
   widgets' rectangles (price panel, related-items column, open tooltips /
   popovers) while inactive, the whole surface while active;
-- keyboard: mapped with `none`, then `on_demand` after the first frame. The
-  game keeps the keyboard; hovering the panel gives it the keyboard; moving
-  back over the game returns it.
+- keyboard: mapped with `none`, then `on_demand` once the first frame is
+  shown. The game keeps the keyboard; hovering the panel gives it the
+  keyboard; moving back over the game returns it. In the active mode too the
+  keyboard only moves to the overlay with the next pointer motion (`Esc` and
+  the overlay key work either way, they are binds).
 
 Because the surface is the game window, the renderer runs in EE2's **overlay
 mode** (the old `Host.isElectron` branch, now driven by `?mode=overlay`) and
